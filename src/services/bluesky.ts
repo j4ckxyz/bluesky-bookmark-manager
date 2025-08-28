@@ -189,29 +189,14 @@ class BlueskyService {
   // Search-based loader: finds replies from the user containing the 📌 emoji, then
   // returns the parent posts (targets) and a bookmarkTimes map (parentUri -> reply.createdAt)
   async searchPinnedReplyPage(handle: string, cursor?: string, limit: number = 50): Promise<{ posts: BlueskyPost[]; cursor?: string; bookmarkTimes: Record<string, string>; }> {
-    try {
-      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
-  // Query: only posts from this user; we'll keep only replies and order by recency
-  const query = `from:${handle.replace(/^@/, '')}`;
-      url.searchParams.set('q', query);
-      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
-      if (cursor) url.searchParams.set('cursor', cursor);
-
-      const resp = await fetch(url.toString(), { method: 'GET' });
-      if (!resp.ok) {
-        console.error('Failed to search posts:', resp.status, resp.statusText);
-        return { posts: [], cursor: undefined, bookmarkTimes: {} };
-      }
-      const data = await resp.json();
-      const nextCursor: string | undefined = data?.cursor;
-      const items = (data?.posts ?? []) as any[];
-
+    // Helper to construct result from an array of reply-like posts
+  const buildFromReplyItems = async (items: any[], nextCursor?: string) => {
       const parentUris: string[] = [];
       const bookmarkTimes: Record<string, string> = {};
       const seen = new Set<string>();
       for (const post of items) {
         const parentUri: string | undefined = post?.record?.reply?.parent?.uri;
-        if (!parentUri) continue; // only replies; no extra text filtering
+        if (!parentUri) continue; // only replies
         if (!seen.has(parentUri)) {
           seen.add(parentUri);
           parentUris.push(parentUri);
@@ -219,21 +204,58 @@ class BlueskyService {
           if (createdAt) bookmarkTimes[parentUri] = createdAt;
         }
       }
-
       if (parentUris.length === 0) {
-        return { posts: [], cursor: nextCursor, bookmarkTimes };
+        return { posts: [] as BlueskyPost[], cursor: nextCursor, bookmarkTimes };
       }
-
       const posts: BlueskyPost[] = await this.getPosts(parentUris);
-      // Sort by bookmark time desc
       posts.sort((a, b) => {
         const ta = new Date(bookmarkTimes[a.uri] ?? a.record.createdAt).getTime();
         const tb = new Date(bookmarkTimes[b.uri] ?? b.record.createdAt).getTime();
         return tb - ta;
       });
-      return { posts, cursor: nextCursor, bookmarkTimes };
+  return { posts, cursor: nextCursor, bookmarkTimes };
+    };
+
+    // First attempt: AppView search (may be blocked by CORS or disabled)
+    try {
+      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
+      const query = `from:${handle.replace(/^@/, '')}`;
+      url.searchParams.set('q', query);
+      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+      if (cursor) url.searchParams.set('cursor', cursor);
+
+      const resp = await fetch(url.toString(), { method: 'GET' });
+      if (resp.ok) {
+        const data = await resp.json();
+        const nextCursor: string | undefined = data?.cursor;
+        const items = (data?.posts ?? []) as any[];
+        return await buildFromReplyItems(items, nextCursor);
+      }
+      // Non-OK (e.g., 403) — fall through to author feed
+      console.warn('Search API not available, falling back to author feed:', resp.status, resp.statusText);
     } catch (error) {
-      console.error('Error searching pinned replies:', error);
+      // Network/CORS error — fall back
+      console.warn('Search API failed, falling back to author feed:', error);
+    }
+
+    // Fallback: getAuthorFeed (posts_with_replies) and keep only replies
+    try {
+      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed');
+      url.searchParams.set('actor', handle);
+      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+      url.searchParams.set('filter', 'posts_with_replies');
+      if (cursor) url.searchParams.set('cursor', cursor);
+      const resp = await fetch(url.toString(), { method: 'GET' });
+      if (!resp.ok) {
+        console.error('Failed to fetch author feed:', resp.status, resp.statusText);
+        return { posts: [], cursor: undefined, bookmarkTimes: {} };
+      }
+      const data = await resp.json();
+      const nextCursor: string | undefined = data?.cursor;
+      const items = ((data?.feed ?? []) as Array<{ post: any }>).map((it) => it.post);
+      return await buildFromReplyItems(items, nextCursor);
+    } catch (error) {
+      console.error('Error fetching author feed replies:', error);
       return { posts: [], cursor: undefined, bookmarkTimes: {} };
     }
   }
