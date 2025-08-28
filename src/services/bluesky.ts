@@ -186,9 +186,10 @@ class BlueskyService {
     }
   }
 
-  // Loader: list author's latest replies via AppView search (fast, CORS-friendly),
-  // then fall back to /xrpc search, then author feed. Returns parent posts of replies
-  // and a bookmarkTimes map (parentUri -> reply.createdAt)
+  // Loader: list author's latest 📌 replies via AppView search (fast),
+  // then fall back to author feed. Returns parent posts of replies and
+  // a bookmarkTimes map (parentUri -> reply.createdAt).
+  // Cursor is namespaced to avoid mixing providers: 'search::<token>' | 'feed::<token>'.
   async searchPinnedReplyPage(handle: string, cursor?: string, limit: number = 50): Promise<{ posts: BlueskyPost[]; cursor?: string; bookmarkTimes: Record<string, string>; }> {
     // Helper to construct result from an array of reply-like posts
     const buildFromReplyItems = async (items: any[], nextCursor?: string) => {
@@ -219,38 +220,42 @@ class BlueskyService {
   return { posts, cursor: nextCursor, bookmarkTimes };
     };
 
-    // First: use our proxy function to avoid CORS and enforce pinned-only query
+    // First: call public AppView search directly (client-side) for speed
     try {
-      const url = new URL('/api/searchPinned', window.location.origin);
-      url.searchParams.set('handle', handle.replace(/^@/, ''));
+      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
+      url.searchParams.set('q', `from:${handle.replace(/^@/, '')} 📌`);
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
-      if (cursor) url.searchParams.set('cursor', cursor);
+      // Only pass cursor if it originated from search
+      if (cursor && cursor.startsWith('search::')) {
+        url.searchParams.set('cursor', cursor.slice('search::'.length));
+      }
       const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
       if (resp.ok) {
         const data = await resp.json();
-        const nextCursor: string | undefined = data?.cursor;
+        const searchNext = data?.cursor ? `search::${data.cursor}` : undefined;
         const items = (data?.posts ?? []) as any[];
-        return await buildFromReplyItems(items, nextCursor);
+        return await buildFromReplyItems(items, searchNext);
       }
-      console.warn('Pinned proxy not available, status:', resp.status, resp.statusText);
+      // If not ok, fall through to feed fallback
     } catch (e) {
-      console.warn('Pinned proxy failed:', e);
+      // Fall through to feed fallback on network/CORS errors
     }
 
     // Finally: getAuthorFeed (posts_with_replies) and keep only replies that include 📌
     try {
-      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed');
+  const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed');
       url.searchParams.set('actor', handle);
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
       url.searchParams.set('filter', 'posts_with_replies');
-      if (cursor) url.searchParams.set('cursor', cursor);
+  // Only pass cursor if it originated from feed
+  if (cursor && cursor.startsWith('feed::')) url.searchParams.set('cursor', cursor.slice('feed::'.length));
       const resp = await fetch(url.toString(), { method: 'GET' });
       if (!resp.ok) {
         console.error('Failed to fetch author feed:', resp.status, resp.statusText);
         return { posts: [], cursor: undefined, bookmarkTimes: {} };
       }
       const data = await resp.json();
-      const nextCursor: string | undefined = data?.cursor;
+  const nextCursor: string | undefined = data?.cursor ? `feed::${data.cursor}` : undefined;
       const items = ((data?.feed ?? []) as Array<{ post: any }>)
         .map((it) => it.post)
         .filter((post) => !!post?.record?.reply?.parent?.uri && (post?.record?.text || '').includes('📌'));
