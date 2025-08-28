@@ -78,9 +78,9 @@ class AuthService {
       // If on production domain, use a static client_id pointing to hosted client-metadata.json
       // else use special localhost client_id format.
       const oauthClient = this.isProdHost
-        ? new ATProtoOAuthClient(
-            authorizationServer,
-            'https://bookmarks.atproto.uk/oauth-client-metadata.json',
+    ? new ATProtoOAuthClient(
+      authorizationServer,
+      'https://bookmarks.atproto.uk/oauth/client-metadata.json',
             // Use actual origin to support both prod and preview deployments if hosted under domain
             `${window.location.origin}/auth/callback`,
             null,
@@ -180,7 +180,7 @@ class AuthService {
   const oauthClient = this.isProdHost
         ? new ATProtoOAuthClient(
             authorizationServer,
-            'https://bookmarks.atproto.uk/oauth-client-metadata.json',
+            'https://bookmarks.atproto.uk/oauth/client-metadata.json',
             `${window.location.origin}/auth/callback`,
             null,
           )
@@ -280,7 +280,7 @@ class AuthService {
     const oauthClient = this.isProdHost
       ? new ATProtoOAuthClient(
           authorizationServer,
-          'https://bookmarks.atproto.uk/oauth-client-metadata.json',
+          'https://bookmarks.atproto.uk/oauth/client-metadata.json',
           `${window.location.origin}/auth/callback`,
           null,
         )
