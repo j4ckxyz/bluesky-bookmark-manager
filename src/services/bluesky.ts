@@ -220,15 +220,12 @@ class BlueskyService {
   return { posts, cursor: nextCursor, bookmarkTimes };
     };
 
-    // First: call public AppView search directly (client-side) for speed
+    // First: use our proxy function to avoid CORS and enforce pinned-only query
     try {
-      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
-      url.searchParams.set('q', `from:${handle.replace(/^@/, '')} 📌`);
+      const url = new URL('/api/searchPinned', window.location.origin);
+      url.searchParams.set('handle', handle.replace(/^@/, ''));
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
-      // Only pass cursor if it originated from search
-      if (cursor && cursor.startsWith('search::')) {
-        url.searchParams.set('cursor', cursor.slice('search::'.length));
-      }
+      if (cursor) url.searchParams.set('cursor', cursor);
       const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
       if (resp.ok) {
         const data = await resp.json();
@@ -236,9 +233,9 @@ class BlueskyService {
         const items = (data?.posts ?? []) as any[];
         return await buildFromReplyItems(items, searchNext);
       }
-      // If not ok, fall through to feed fallback
+      console.warn('Pinned proxy not available, status:', resp.status, resp.statusText);
     } catch (e) {
-      // Fall through to feed fallback on network/CORS errors
+      console.warn('Pinned proxy failed:', e);
     }
 
     // Finally: getAuthorFeed (posts_with_replies) and keep only replies that include 📌

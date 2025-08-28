@@ -7,7 +7,7 @@ export async function onRequest(context: any): Promise<Response> {
     const url = new URL(context.request.url);
     const handle = (url.searchParams.get('handle') || '').replace(/^@/, '');
     const limit = url.searchParams.get('limit') || '50';
-    const cursor = url.searchParams.get('cursor') || '';
+    const cursor = (url.searchParams.get('cursor') || '').replace(/^(search|feed)::/, '');
     if (!handle) {
       return new Response(JSON.stringify({ error: 'missing handle' }), {
         status: 400,
@@ -24,7 +24,10 @@ export async function onRequest(context: any): Promise<Response> {
     // Some edge deployments require a UA; also forward Accept only
     const upstreamHeaders: HeadersInit = {
       'Accept': 'application/json',
-      'User-Agent': 'bluesky-bookmarks-pages-fn/1.0 (+https://bookmarks.atproto.uk)'
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Origin': 'https://bookmarks.atproto.uk',
+      'Referer': 'https://bookmarks.atproto.uk/',
     };
     const resp = await fetch(target.toString(), { method: 'GET', headers: upstreamHeaders });
     const text = await resp.text();
