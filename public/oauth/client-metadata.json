@@ -5,8 +5,7 @@
   "scope": "atproto repo:app.bsky.feed.post repo:uk.atproto.bookmark.list repo:uk.atproto.bookmark.listItem",
   "redirect_uris": [
     "https://bookmarks.atproto.uk/auth/callback",
-    "http://127.0.0.1:5173/auth/callback",
-    "http://localhost:5173/auth/callback"
+    "http://127.0.0.1:5173/auth/callback"
   ],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
