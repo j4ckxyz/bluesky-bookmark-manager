@@ -105,7 +105,8 @@ async function xrpc(path: string, init?: RequestInit & { json?: any }): Promise<
           try {
             const origin = window.location.origin.replace('localhost', '127.0.0.1');
             const redirectUri = `${origin}/auth/callback`;
-            const client = createLocalhostATProtoOAuthClient(issuer, redirectUri, ["transition:generic"]);
+            const storedScopes = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
+            const client = createLocalhostATProtoOAuthClient(issuer, redirectUri, storedScopes);
             const body = new URLSearchParams();
             body.set('grant_type', 'refresh_token');
             body.set('client_id', (client as any).clientId || '');

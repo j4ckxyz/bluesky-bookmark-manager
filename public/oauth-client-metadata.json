@@ -2,7 +2,7 @@
   "client_id": "https://bookmarks.atproto.uk/oauth-client-metadata.json",
   "client_name": "Bookmarks for Bluesky",
   "application_type": "web",
-  "scope": "atproto com.atproto.repo.write transition:generic",
+  "scope": "atproto repo:uk.atproto.bookmark.list repo:uk.atproto.bookmark.listItem",
   "redirect_uris": [
   "https://bookmarks.atproto.uk/auth/callback"
   ],

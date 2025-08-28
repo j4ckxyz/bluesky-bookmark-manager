@@ -45,10 +45,10 @@ class AuthService {
       }
       
       // Step 4: Get authorization server metadata
-      const metadata = await getATProtoAuthorizationServerMetadata(authorizationServer);
+    const metadata = await getATProtoAuthorizationServerMetadata(authorizationServer);
   if (import.meta.env.DEV) console.log(`[OAuth] Metadata retrieved for issuer: ${metadata.issuer}`);
-  // Request write scope to enable creating records
-  const optionalScopes: string[] = ["transition:generic", 'com.atproto.repo.write'];
+  // Default to read-only: request no optional scopes beyond mandatory "atproto"
+  const optionalScopes: string[] = [];
       
       // Step 5: Generate OAuth parameters
       const state = generateOAuthNonce();
@@ -171,7 +171,7 @@ class AuthService {
       } as CryptoKeyPair;
       
       // Create OAuth client
-      const oauthClient = this.isProdHost
+  const oauthClient = this.isProdHost
         ? new ATProtoOAuthClient(
             authorizationServer,
             'https://bookmarks.atproto.uk/oauth-client-metadata.json',
@@ -181,7 +181,7 @@ class AuthService {
         : createLocalhostATProtoOAuthClient(
             authorizationServer,
             this.redirectUri,
-            ["transition:generic"]
+    JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]')
           );
       
       // Exchange authorization code for tokens
@@ -237,6 +237,67 @@ class AuthService {
     sessionStorage.removeItem('oauth_did');
     sessionStorage.removeItem('oauth_authorization_server');
     sessionStorage.removeItem('oauth_token_endpoint');
+  }
+
+  // Optional: re-initiate OAuth requesting write access limited to our collections lexicon
+  // This will redirect the user through the auth flow again.
+  async requestWriteForCollections(handle: string): Promise<void> {
+    const normalizedHandle = handle.toLowerCase().replace(/^@/, '');
+    const did = await resolveATProtoHandle(normalizedHandle);
+    const pdsEndpoint = await getPDSFromAccountDID(did);
+    const authorizationServer = await getAuthorizationServer(pdsEndpoint);
+    const metadata = await getATProtoAuthorizationServerMetadata(authorizationServer);
+    const state = generateOAuthNonce();
+    const codeVerifier = generateOAuthNonce();
+    if (!window.crypto?.subtle) {
+      throw new Error('Web Crypto API unavailable. Use a modern browser over http://127.0.0.1.');
+    }
+    const dpopKeyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const pendingJwk = {
+      privateKey: await window.crypto.subtle.exportKey('jwk', dpopKeyPair.privateKey),
+      publicKey: await window.crypto.subtle.exportKey('jwk', dpopKeyPair.publicKey)
+    };
+    sessionStorage.setItem('pending_dpop_key_pair', JSON.stringify(pendingJwk));
+    // Prefer granular repo permissions as defined in proposals; servers that don't support may reject
+    const optionalScopes = [
+      'repo:uk.atproto.bookmark.list',
+      'repo:uk.atproto.bookmark.listItem',
+    ];
+    const oauthClient = this.isProdHost
+      ? new ATProtoOAuthClient(
+          authorizationServer,
+          'https://bookmarks.atproto.uk/oauth-client-metadata.json',
+          `${window.location.origin}/auth/callback`,
+          null,
+        )
+      : createLocalhostATProtoOAuthClient(
+          authorizationServer,
+          this.redirectUri,
+          optionalScopes,
+        );
+    const authorizationURL = await oauthClient.createAuthorizationURL(
+      metadata.pushedAuthorizationRequestEndpoint,
+      metadata.authorizationEndpoint,
+      state,
+      codeVerifier,
+      optionalScopes,
+      dpopKeyPair,
+      pdsEndpoint,
+      normalizedHandle,
+    );
+    sessionStorage.setItem('oauth_state', state);
+    sessionStorage.setItem('oauth_code_verifier', codeVerifier);
+    sessionStorage.setItem('oauth_handle', normalizedHandle);
+    sessionStorage.setItem('oauth_did', did);
+    sessionStorage.setItem('oauth_authorization_server', authorizationServer);
+    sessionStorage.setItem('oauth_optional_scopes', JSON.stringify(optionalScopes));
+    sessionStorage.setItem('user_pds', pdsEndpoint);
+    sessionStorage.setItem('oauth_token_endpoint', metadata.tokenEndpoint);
+    window.location.href = authorizationURL.toString();
   }
 
   getStoredSession(): UserSession | null {

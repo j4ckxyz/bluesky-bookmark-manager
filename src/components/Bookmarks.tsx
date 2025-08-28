@@ -5,7 +5,7 @@ import { authService } from '../services/auth';
 import { blueskyService } from '../services/bluesky';
 import type { BlueskyPost, UserSession } from '../types';
 import { getCache, mergeIntoCache, replaceCache } from '../services/bookmarkCache';
-import { followCreator } from '../services/follow.ts';
+// import { followCreator } from '../services/follow.ts';
 
 interface BookmarksProps {
   session: UserSession;
@@ -22,8 +22,9 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [isFetchingAll, setIsFetchingAll] = useState(false);
-  const [showFollowPrompt, setShowFollowPrompt] = useState(false);
-  const [creator, setCreator] = useState<{ did: string; handle: string; displayName?: string; avatar?: string; description?: string } | null>(null);
+  // Follow prompt removed to keep scopes limited to this app's lexicon only
+  // const [showFollowPrompt, setShowFollowPrompt] = useState(false);
+  // const [creator, setCreator] = useState<{ did: string; handle: string; displayName?: string; avatar?: string; description?: string } | null>(null);
 
   const loadBookmarks = async () => {
     setIsLoading(true);
@@ -88,18 +89,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     loadBookmarks();
   }, [session]);
 
-  // One-time follow prompt on first login per browser
-  useEffect(() => {
-    const dismissed = localStorage.getItem('follow_prompt_dismissed');
-    if (dismissed === '1') return;
-    (async () => {
-      const p = await blueskyService.getProfile('j4ck.xyz');
-      if (p?.did) {
-        setCreator(p);
-        setShowFollowPrompt(true);
-      }
-    })();
-  }, []);
+  // Follow prompt removed (non-lexicon write)
 
   const loadMore = useCallback(async () => {
     if (!cursor || isLoadingMore) return;
@@ -294,51 +284,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
         </div>
       </footer>
 
-      {/* Follow Prompt Modal */}
-      {showFollowPrompt && creator && (
-        <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 backdrop-blur-sm bg-black/40" onClick={() => { localStorage.setItem('follow_prompt_dismissed','1'); setShowFollowPrompt(false); }} />
-          <div className="absolute inset-0 flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl overflow-hidden">
-              <div className="p-5 sm:p-6">
-                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 mb-3">Follow the creator?</h2>
-                <div className="flex items-center gap-4">
-                  <img src={creator.avatar || '/favicon.svg'} alt="avatar" className="h-14 w-14 rounded-full object-cover border border-gray-200 dark:border-gray-800" />
-                  <div className="min-w-0">
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">{creator.displayName || '@'+creator.handle}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400 truncate">@{creator.handle}</div>
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">This helps support the app and makes it easy to reach the creator (@j4ck.xyz) for updates.</p>
-                {creator.description && (
-                  <p className="mt-4 text-sm text-gray-700 dark:text-gray-300 max-h-40 overflow-y-auto">{creator.description}</p>
-                )}
-                <div className="mt-6 flex items-center justify-end gap-3">
-                  <button
-                    onClick={() => { localStorage.setItem('follow_prompt_dismissed','1'); setShowFollowPrompt(false); }}
-                    className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  >
-                    Not now
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await followCreator(creator.did);
-                      } finally {
-                        localStorage.setItem('follow_prompt_dismissed','1');
-                        setShowFollowPrompt(false);
-                      }
-                    }}
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    Follow @j4ck.xyz
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+  {/* Follow UI removed */}
     </div>
   );
 }

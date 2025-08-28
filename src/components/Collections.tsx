@@ -4,6 +4,7 @@ import { listCollections, createCollection, addPostToCollection, getCollection, 
 import { PostCard } from './PostCard';
 import { blueskyService } from '../services/bluesky';
 import { fetchAnisotaLists, fetchAnisotaListItems, type AnisotaList } from '../services/anisota';
+import { authService } from '../services/auth';
 
 interface CollectionsProps {
   onOpenCollection: (collection: PostCollection) => void;
@@ -17,6 +18,9 @@ export function Collections({ onOpenCollection }: CollectionsProps) {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [color, setColor] = useState('#3b82f6');
+  const [hasWrite, setHasWrite] = useState(false);
+  const [enablingWrite, setEnablingWrite] = useState(false);
+  const [handle, setHandle] = useState<string>('');
 
   // Anisota state
   const [anisotaLists, setAnisotaLists] = useState<AnisotaList[]>([]);
@@ -47,6 +51,17 @@ export function Collections({ onOpenCollection }: CollectionsProps) {
   }
 
   useEffect(() => { refresh(); }, []);
+
+  // Detect if current session has the narrow repo write scopes
+  useEffect(() => {
+    try {
+      const session = authService.getStoredSession();
+      if (session?.handle) setHandle(session.handle);
+      const scopes: string[] = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
+      const need = ['repo:uk.atproto.bookmark.list', 'repo:uk.atproto.bookmark.listItem'];
+      setHasWrite(need.every(s => scopes.includes(s)));
+    } catch {}
+  }, []);
 
   // Load anisota lists when switching to that mode
   useEffect(() => {
@@ -95,18 +110,30 @@ export function Collections({ onOpenCollection }: CollectionsProps) {
         {mode==='collections' && (
           <div className="mb-4 p-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 flex items-start space-x-2">
             <AlertTriangle className="h-5 w-5 mt-0.5" />
-            <div className="text-sm">Post collections are public. Anyone can view them with third-party tools.</div>
+            <div className="text-sm">
+              Post collections are public. Anyone can view them with third-party tools.
+              {!hasWrite && (
+                <span className="ml-2 inline-flex items-center gap-2">
+                  <button
+                    disabled={enablingWrite || !handle}
+                    onClick={async ()=>{ try { setEnablingWrite(true); await authService.requestWriteForCollections(handle); } finally { setEnablingWrite(false); } }}
+                    className="px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 text-xs"
+                  >{enablingWrite ? 'Redirecting…' : 'Enable writing'}</button>
+                  <span className="text-xs text-gray-700 dark:text-gray-300">to create/edit lists</span>
+                </span>
+              )}
+            </div>
           </div>
         )}
 
-        {mode==='collections' && (
+    {mode==='collections' && (
           <form onSubmit={onCreate} className="mb-6 flex items-center space-x-2">
             <input value={name} onChange={e=>setName(e.target.value)} placeholder="New collection name" className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <div className="flex items-center space-x-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-2">
               <input type="color" value={color} onChange={e=>setColor(e.target.value)} title="Color" className="w-6 h-6 p-0 border-0 bg-transparent" />
               <span className="text-xs text-gray-600 dark:text-gray-300">Color</span>
             </div>
-            <button type="submit" className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 flex items-center space-x-1"><Plus className="h-4 w-4"/><span>Create</span></button>
+      <button type="submit" disabled={!hasWrite} className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-1"><Plus className="h-4 w-4"/><span>Create</span></button>
           </form>
         )}
 
@@ -267,6 +294,8 @@ function AnisotaListDetail({ list, onBack }: { list: AnisotaList; onBack: ()=>vo
   const [subjects, setSubjects] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importDoneUri, setImportDoneUri] = useState<string | null>(null);
+  const [hasWrite, setHasWrite] = useState(false);
+  const [handle, setHandle] = useState<string>('');
 
   useEffect(() => {
     (async () => {
@@ -290,8 +319,19 @@ function AnisotaListDetail({ list, onBack }: { list: AnisotaList; onBack: ()=>vo
     })();
   }, [list.uri]);
 
+  useEffect(() => {
+    try {
+      const sess = authService.getStoredSession();
+      if (sess?.handle) setHandle(sess.handle);
+      const scopes: string[] = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
+      const need = ['repo:uk.atproto.bookmark.list', 'repo:uk.atproto.bookmark.listItem'];
+      setHasWrite(need.every(s => scopes.includes(s)));
+    } catch {}
+  }, []);
+
   const onImport = async () => {
     if (!subjects.length) return;
+  if (!hasWrite) return;
     setImporting(true);
     setError('');
     try {
@@ -323,9 +363,15 @@ function AnisotaListDetail({ list, onBack }: { list: AnisotaList; onBack: ()=>vo
         Read-only: viewing items from your PDS (net.anisota.feed.list). Optionally import into this app's collections for faster access.
       </div>
       <div className="mb-4 flex items-center gap-3">
-        <button onClick={onImport} disabled={importing || subjects.length===0} className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
-          {importing ? 'Importing…' : 'Import into this app'}
+        <button onClick={onImport} disabled={importing || subjects.length===0 || !hasWrite} className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+          {importing ? 'Importing…' : hasWrite ? 'Import into this app' : 'Enable writing first'}
         </button>
+        {!hasWrite && (
+          <button
+            onClick={async ()=>{ try { await authService.requestWriteForCollections(handle); } catch {} }}
+            className="px-3 py-2 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+          >Enable writing</button>
+        )}
         {importDoneUri && (
           <a href={`/collections/${encodeURIComponent(importDoneUri.split('/').pop()!)}`} className="ml-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">View imported collection →</a>
         )}
