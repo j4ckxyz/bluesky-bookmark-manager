@@ -165,6 +165,8 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
   const [pinBusy, setPinBusy] = useState(false);
   const [pinError, setPinError] = useState('');
   const [hasPostWrite, setHasPostWrite] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [clipboardUrl, setClipboardUrl] = useState<string | null>(null);
   useEffect(() => {
     try {
       const scopes: string[] = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
@@ -172,6 +174,15 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
       const s = 'app.bsky.feed.post';
       setHasPostWrite(scopes.includes(`repo:${s}`) || granted.includes(`repo:${s}`));
     } catch {}
+  }, []);
+  useEffect(() => {
+    // Try to read a URL from clipboard (best-effort; may be denied)
+    (async () => {
+      try {
+        const txt = await navigator.clipboard.readText();
+        if (txt && /^(https?:\/\/|at:\/\/)/i.test(txt)) setClipboardUrl(txt.trim());
+      } catch {}
+    })();
   }, []);
 
   async function onPastePin(e: React.FormEvent) {
@@ -240,22 +251,34 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
 
   {/* Search and Stats */}
   <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
-  {/* Paste-to-pin */}
-  <form onSubmit={onPastePin} className="mb-4 flex items-center gap-2">
-    <input
-      type="url"
-      inputMode="url"
-      value={pinInput}
-      onChange={e=>setPinInput(e.target.value)}
-      placeholder="Paste a Bluesky post URL to bookmark (📌 reply)"
-      className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-    />
-    <button type="submit" disabled={pinBusy} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{pinBusy?'Posting…':'Pin it'}</button>
-    {!hasPostWrite && (
-      <button type="button" onClick={async ()=>{ try { await authService.requestWriteForCollections(session.handle); } catch {} }} className="px-3 py-2 rounded bg-indigo-600 text-white">Enable post write</button>
+  {/* Pin dropdown */}
+  <div className="mb-4 relative">
+    <button onClick={()=>setPinOpen(v=>!v)} className="px-3 py-2 rounded border border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">📌 Pin a post</button>
+    {pinOpen && (
+      <div className="absolute z-10 mt-2 w-full max-w-xl p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded shadow">
+        <form onSubmit={onPastePin} className="flex items-center gap-2">
+          <input
+            type="url"
+            inputMode="url"
+            value={pinInput}
+            onChange={e=>setPinInput(e.target.value)}
+            placeholder="Paste a Bluesky post URL or at:// URI"
+            className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button type="submit" disabled={pinBusy} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{pinBusy?'Posting…':'Pin it'}</button>
+          {!hasPostWrite && (
+            <button type="button" onClick={async ()=>{ try { await authService.requestWriteForCollections(session.handle); } catch {} }} className="px-3 py-2 rounded bg-indigo-600 text-white">Enable post write</button>
+          )}
+        </form>
+        {clipboardUrl && (
+          <div className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+            Clipboard: <button className="underline" onClick={()=>setPinInput(clipboardUrl!)}>{clipboardUrl}</button>
+          </div>
+        )}
+        {pinError && <div className="mt-2 text-sm text-red-600 dark:text-red-400">{pinError}</div>}
+      </div>
     )}
-  </form>
-  {pinError && <div className="-mt-3 mb-3 text-sm text-red-600 dark:text-red-400">{pinError}</div>}
+  </div>
   <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />

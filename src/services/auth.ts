@@ -47,8 +47,15 @@ class AuthService {
       // Step 4: Get authorization server metadata
     const metadata = await getATProtoAuthorizationServerMetadata(authorizationServer);
   if (import.meta.env.DEV) console.log(`[OAuth] Metadata retrieved for issuer: ${metadata.issuer}`);
-  // Default to read-only with mandatory "atproto" only. We use public AppView for reads.
-  const optionalScopes: string[] = [];
+  // Streamlined scopes: only what's needed
+  // - write posts (for pin replies)
+  // - write our collections (uk.atproto.bookmark.list + listItem)
+  // - read Anisota collections (net.anisota.feed.list + listItem)
+  const optionalScopes: string[] = [
+    'repo:app.bsky.feed.post',
+    'repo:uk.atproto.bookmark.list',
+    'repo:uk.atproto.bookmark.listItem',
+  ];
       
       // Step 5: Generate OAuth parameters
       const state = generateOAuthNonce();
@@ -266,8 +273,9 @@ class AuthService {
       publicKey: await window.crypto.subtle.exportKey('jwk', dpopKeyPair.publicKey)
     };
     sessionStorage.setItem('pending_dpop_key_pair', JSON.stringify(pendingJwk));
-    // Request only granular repo write permissions for our NSIDs
+    // Request only granular repo permissions required by the app (same as initial login)
     const optionalScopes = [
+      'repo:app.bsky.feed.post',
       'repo:uk.atproto.bookmark.list',
       'repo:uk.atproto.bookmark.listItem',
     ];

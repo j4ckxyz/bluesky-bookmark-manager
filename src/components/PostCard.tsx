@@ -3,6 +3,7 @@ import type { BlueskyPost } from '../types';
 import { listCollections, addPostToCollection, createCollection, type PostCollection } from '../services/collections';
 import { authService } from '../services/auth';
 import { useEffect, useState } from 'react';
+import { blueskyService } from '../services/bluesky';
 
 interface PostCardProps {
   post: BlueskyPost;
@@ -17,6 +18,10 @@ export function PostCard({ post }: PostCardProps) {
   const [newErr, setNewErr] = useState('');
   const [hasWrite, setHasWrite] = useState(false);
   const [handle, setHandle] = useState<string>('');
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [hasPostWrite, setHasPostWrite] = useState(false);
 
   useEffect(() => {
     // prefetch lightly; do not spam PDS
@@ -30,6 +35,14 @@ export function PostCard({ post }: PostCardProps) {
       const needB = 'repo:uk.atproto.bookmark.listItem';
       const has = (arr: string[]) => arr.includes(needA) && arr.includes(needB);
       setHasWrite(has(opt) || (granted.includes(needA) && granted.includes(needB)));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      const scopes: string[] = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
+      const granted = sessionStorage.getItem('oauth_granted_scope') || '';
+      const s = 'app.bsky.feed.post';
+      setHasPostWrite(scopes.includes(`repo:${s}`) || granted.includes(`repo:${s}`));
     } catch {}
   }, []);
 
@@ -261,6 +274,41 @@ export function PostCard({ post }: PostCardProps) {
               <Plus className="h-4 w-4" />
               <span>Add to collection</span>
             </button>
+            <div className="relative ml-2">
+              <button onClick={()=>setPinOpen(v=>!v)} className="px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center space-x-1">
+                <span>📌 Pin</span>
+              </button>
+              {pinOpen && (
+                <div className="absolute right-0 mt-2 w-64 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow">
+                  <div className="text-xs text-gray-600 dark:text-gray-300 mb-2">Post a 📌 reply to bookmark this</div>
+                  <button
+                    disabled={pinBusy}
+                    onClick={async ()=>{
+                      setPinError('');
+                      try {
+                        if (!hasPostWrite) {
+                          if (handle) await authService.requestWriteForCollections(handle);
+                          return;
+                        }
+                        setPinBusy(true);
+                        const ok = await blueskyService.pinByUrl(post.uri);
+                        if (!ok) throw new Error('Failed to pin');
+                        setPinOpen(false);
+                      } catch(e:any) {
+                        setPinError(e?.message || 'Failed to pin');
+                      } finally {
+                        setPinBusy(false);
+                      }
+                    }}
+                    className="w-full px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50"
+                  >{pinBusy ? 'Posting…' : 'Pin this post'}</button>
+                  {!hasPostWrite && (
+                    <button type="button" onClick={async ()=>{ if (handle) await authService.requestWriteForCollections(handle); }} className="mt-2 w-full px-2 py-1 rounded bg-indigo-600 text-white text-xs">Enable post write</button>
+                  )}
+                  {pinError && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{pinError}</div>}
+                </div>
+              )}
+            </div>
           </div>
           {chooserOpen && (
             <div className="mt-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
