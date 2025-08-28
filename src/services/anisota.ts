@@ -60,15 +60,23 @@ export async function fetchAnisotaLists(): Promise<AnisotaList[]> {
   const session = getSession();
   const pds = getPds();
   if (!pds) throw new Error('Missing PDS');
-  const params = new URLSearchParams({ repo: session.did, collection: 'net.anisota.feed.list', limit: '100' });
-  const res = await xrpc(`/xrpc/com.atproto.repo.listRecords?${params.toString()}`, { method: 'GET' });
-  if (!res.ok) return [];
-  const j = await res.json();
-  const lists: AnisotaList[] = (j.records || []).map((r: any) => ({
-    uri: r.uri,
-    rkey: (r.uri as string).split('/').pop(),
-    value: r.value,
-  }));
+  // Page through all list records
+  const lists: AnisotaList[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const params = new URLSearchParams({ repo: session.did, collection: 'net.anisota.feed.list', limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await xrpc(`/xrpc/com.atproto.repo.listRecords?${params.toString()}`, { method: 'GET' });
+    if (!res.ok) break;
+    const j = await res.json();
+    const page: AnisotaList[] = (j.records || []).map((r: any) => ({
+      uri: r.uri,
+      rkey: (r.uri as string).split('/').pop(),
+      value: r.value,
+    }));
+    lists.push(...page);
+    cursor = j?.cursor;
+  } while (cursor);
   setCache({ ...(cached||{}), lists });
   return lists;
 }
@@ -80,14 +88,32 @@ export async function fetchAnisotaListItems(listUri: string): Promise<AnisotaLis
   const session = getSession();
   const pds = getPds();
   if (!pds) throw new Error('Missing PDS');
-  // We need to enumerate items via listRecords and filter by list URI.
-  const params = new URLSearchParams({ repo: session.did, collection: 'net.anisota.feed.listItem', limit: '200' });
-  const res = await xrpc(`/xrpc/com.atproto.repo.listRecords?${params.toString()}`, { method: 'GET' });
-  if (!res.ok) return [];
-  const j = await res.json();
-  const items: AnisotaListItem[] = (j.records || [])
-    .filter((r: any) => r?.value?.list === listUri)
-    .map((r: any) => ({ uri: r.uri, rkey: (r.uri as string).split('/').pop(), value: r.value }));
+  // Enumerate ALL items via pagination, then filter by list URI. Handle list as string or strongRef object.
+  const all: any[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const params = new URLSearchParams({ repo: session.did, collection: 'net.anisota.feed.listItem', limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await xrpc(`/xrpc/com.atproto.repo.listRecords?${params.toString()}`, { method: 'GET' });
+    if (!res.ok) break;
+    const j = await res.json();
+    all.push(...(j.records || []));
+    cursor = j?.cursor;
+  } while (cursor);
+
+  const items: AnisotaListItem[] = all
+    .filter((r: any) => {
+      const lv = r?.value?.list;
+      if (!lv) return false;
+      if (typeof lv === 'string') return lv === listUri;
+      if (typeof lv === 'object' && typeof lv.uri === 'string') return lv.uri === listUri;
+      return false;
+    })
+    .map((r: any) => ({
+      uri: r.uri as string,
+      rkey: ((r.uri as string).split('/').pop() as string),
+      value: r.value as ListItemRecord,
+    }));
   const next = { ...(cached||{}), [listKey]: items };
   setCache(next);
   return items;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, AlertTriangle, Link as LinkIcon } from 'lucide-react';
-import { listCollections, createCollection, addPostToCollection, getCollection, parsePostInputToAtUri, type PostCollection, updateCollection } from '../services/collections';
+import { listCollections, createCollection, addPostToCollection, getCollection, parsePostInputToAtUri, type PostCollection, listCollectionItems } from '../services/collections';
 import { PostCard } from './PostCard';
 import { blueskyService } from '../services/bluesky';
 import { fetchAnisotaLists, fetchAnisotaListItems, type AnisotaList } from '../services/anisota';
@@ -12,6 +12,7 @@ interface CollectionsProps {
 export function Collections({ onOpenCollection }: CollectionsProps) {
   const [mode, setMode] = useState<'collections' | 'anisota'>('collections');
   const [collections, setCollections] = useState<PostCollection[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [name, setName] = useState('');
@@ -29,6 +30,15 @@ export function Collections({ onOpenCollection }: CollectionsProps) {
     try {
       const cols = await listCollections();
       setCollections(cols);
+      // Compute counts by fetching all items once and grouping by list
+      try {
+        // Minimal: enumerate per collection (serial) to avoid building a new service; can optimize later
+        const entries = await Promise.all(cols.map(async c => {
+          const items = await listCollectionItems(c.uri);
+          return [c.uri, items.length] as const;
+        }));
+        setCounts(Object.fromEntries(entries));
+      } catch {}
     } catch (e: any) {
       setError(e?.message || 'Failed to load collections');
     } finally {
@@ -114,7 +124,7 @@ export function Collections({ onOpenCollection }: CollectionsProps) {
                   <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: col.value.color }} />
                   <div className="font-medium text-gray-900 dark:text-gray-100">{col.value.name}</div>
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">{col.value.items.length} posts</div>
+                <div className="text-sm text-gray-600 dark:text-gray-300 mt-1">{counts[col.uri] ?? 0} posts</div>
               </button>
             ))}
             {collections.length === 0 && (
@@ -166,6 +176,7 @@ export function CollectionDetail({ collectionUri, onBack }: CollectionDetailProp
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [count, setCount] = useState(0);
 
   async function refresh() {
     setLoading(true);
@@ -173,12 +184,11 @@ export function CollectionDetail({ collectionUri, onBack }: CollectionDetailProp
     try {
       const col = await getCollection(collectionUri);
       setCollection(col);
-      if (col.value.items.length) {
-        const fetched = await blueskyService.getPosts(col.value.items);
-        setPosts(fetched);
-      } else {
-        setPosts([]);
-      }
+  const items = await listCollectionItems(collectionUri);
+  setCount(items.length);
+  const subjects = items.map(i => i.value.subject);
+  const fetched = subjects.length ? await blueskyService.getPosts(subjects) : [];
+  setPosts(fetched);
     } catch (e: any) {
       setError(e?.message || 'Failed to load collection');
     } finally {
@@ -193,10 +203,10 @@ export function CollectionDetail({ collectionUri, onBack }: CollectionDetailProp
     if (!input.trim() || !collection) return;
     try {
       const atUri = await parsePostInputToAtUri(input);
-      const updated = await addPostToCollection(collection.uri, atUri);
-      setCollection(updated);
-      const fetched = await blueskyService.getPosts([atUri]);
-      setPosts(prev => [...fetched.filter(p=>!prev.some(x=>x.uri===p.uri)), ...prev]);
+  await addPostToCollection(collection.uri, atUri);
+  const fetched = await blueskyService.getPosts([atUri]);
+  setPosts(prev => [...fetched.filter(p=>!prev.some(x=>x.uri===p.uri)), ...prev]);
+  setCount(c => c + 1);
       setInput('');
     } catch (e: any) {
       setError(e?.message || 'Failed to add post');
@@ -219,8 +229,9 @@ export function CollectionDetail({ collectionUri, onBack }: CollectionDetailProp
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="mb-4 p-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm">
-          Public: others can view this list via third-party tools.
+        <div className="mb-4 p-3 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-sm flex items-center justify-between">
+          <span>Public: others can view this list via third-party tools.</span>
+          <span className="text-xs text-gray-700 dark:text-gray-300">{count} posts</span>
         </div>
 
         <form onSubmit={onAdd} className="mb-6 flex items-center space-x-2">
@@ -286,9 +297,11 @@ function AnisotaListDetail({ list, onBack }: { list: AnisotaList; onBack: ()=>vo
     try {
       const name = list.value.name || 'Imported List';
       const col = await createCollection(name, '#a855f7');
-      // Write all subjects in one update
-      const updated = await updateCollection(col.uri, { $type: 'uk.atproto.bookmark.list', name, color: col.value.color, items: subjects }, col.cid);
-      setImportDoneUri(updated.uri);
+      // Create one listItem per subject
+      for (const s of subjects) {
+        await addPostToCollection(col.uri, s);
+      }
+      setImportDoneUri(col.uri);
     } catch (e: any) {
       setError(e?.message || 'Failed to import');
     } finally {
@@ -309,13 +322,14 @@ function AnisotaListDetail({ list, onBack }: { list: AnisotaList; onBack: ()=>vo
       <div className="mb-4 p-3 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-sm">
         Read-only: viewing items from your PDS (net.anisota.feed.list). Optionally import into this app's collections for faster access.
       </div>
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-3">
         <button onClick={onImport} disabled={importing || subjects.length===0} className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
           {importing ? 'Importing…' : 'Import into this app'}
         </button>
         {importDoneUri && (
           <a href={`/collections/${encodeURIComponent(importDoneUri.split('/').pop()!)}`} className="ml-3 text-sm text-blue-600 dark:text-blue-400 hover:underline">View imported collection →</a>
         )}
+        <span className="text-xs text-gray-600 dark:text-gray-400">{subjects.length} item{subjects.length===1?'':'s'}</span>
       </div>
       {loading ? (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading…</div>

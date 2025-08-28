@@ -6,7 +6,6 @@ export interface PostCollectionRecord {
   $type?: string;
   name: string;
   color: string; // e.g., #ff9900 or tailwind token
-  items: string[]; // list of at:// post URIs
 }
 
 export interface PostCollection {
@@ -16,7 +15,21 @@ export interface PostCollection {
   value: PostCollectionRecord;
 }
 
+export interface PostCollectionListItemRecord {
+  $type?: string;
+  list: string | { uri: string; cid?: string };
+  subject: string; // at:// post URI
+  createdAt?: string;
+}
+
+export interface PostCollectionListItem {
+  uri: string; // at://did/uk.atproto.bookmark.listItem/<rkey>
+  rkey: string;
+  value: PostCollectionListItemRecord;
+}
+
 const COLLECTION_NSID = 'uk.atproto.bookmark.list';
+const COLLECTION_ITEM_NSID = 'uk.atproto.bookmark.listItem';
 let cache: { ts: number; data: PostCollection[] } | null = null;
 const CACHE_TTL_MS = 30_000; // 30s to avoid spamming PDS
 
@@ -171,7 +184,7 @@ export async function listCollections(): Promise<PostCollection[]> {
 
 export async function createCollection(name: string, color: string): Promise<PostCollection> {
   const session = await getSession();
-  const record: PostCollectionRecord = { $type: COLLECTION_NSID, name, color, items: [] };
+  const record: PostCollectionRecord = { $type: COLLECTION_NSID, name, color };
   const res = await xrpc(`/xrpc/com.atproto.repo.createRecord`, {
     method: 'POST',
     json: { repo: session.did, collection: COLLECTION_NSID, record },
@@ -209,19 +222,53 @@ export async function updateCollection(uri: string, value: PostCollectionRecord,
   return { uri, cid, rkey, value };
 }
 
-export async function addPostToCollection(collectionUri: string, postUri: string): Promise<PostCollection> {
-  const col = await getCollection(collectionUri);
-  if (!col.value.items.includes(postUri)) {
-    const updated: PostCollectionRecord = { ...col.value, items: [...col.value.items, postUri] };
-    return updateCollection(collectionUri, updated, col.cid);
-  }
-  return col;
+export async function listCollectionItems(collectionUri: string): Promise<PostCollectionListItem[]> {
+  const session = await getSession();
+  const items: PostCollectionListItem[] = [];
+  let cursor: string | undefined = undefined;
+  do {
+    const params = new URLSearchParams({ repo: session.did, collection: COLLECTION_ITEM_NSID, limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await xrpc(`/xrpc/com.atproto.repo.listRecords?${params.toString()}`, { method: 'GET' });
+    if (!res.ok) break;
+    const j = await res.json();
+    const page = (j.records || []) as any[];
+    for (const r of page) {
+      const lv = r?.value?.list;
+      const listUri = typeof lv === 'string' ? lv : (lv && typeof lv.uri === 'string' ? lv.uri : null);
+      if (listUri === collectionUri) {
+        items.push({ uri: r.uri as string, rkey: (r.uri as string).split('/').pop() as string, value: r.value as PostCollectionListItemRecord });
+      }
+    }
+    cursor = j?.cursor;
+  } while (cursor);
+  return items;
 }
 
-export async function removePostFromCollection(collectionUri: string, postUri: string): Promise<PostCollection> {
-  const col = await getCollection(collectionUri);
-  const updated: PostCollectionRecord = { ...col.value, items: col.value.items.filter(u => u !== postUri) };
-  return updateCollection(collectionUri, updated, col.cid);
+export async function addPostToCollection(collectionUri: string, postUri: string): Promise<PostCollectionListItem> {
+  const session = await getSession();
+  const record: PostCollectionListItemRecord = { $type: COLLECTION_ITEM_NSID, list: collectionUri, subject: postUri, createdAt: new Date().toISOString() };
+  const res = await xrpc(`/xrpc/com.atproto.repo.createRecord`, {
+    method: 'POST',
+    json: { repo: session.did, collection: COLLECTION_ITEM_NSID, record },
+  });
+  if (!res.ok) throw new Error('Failed to add item');
+  const json = await res.json();
+  const uri = json?.uri as string;
+  return { uri, rkey: uri.split('/').pop() as string, value: record };
+}
+
+export async function removePostFromCollection(collectionUri: string, postUri: string): Promise<void> {
+  const session = await getSession();
+  // Find existing matching item(s)
+  const items = await listCollectionItems(collectionUri);
+  const matches = items.filter(it => it.value.subject === postUri);
+  for (const it of matches) {
+    await xrpc(`/xrpc/com.atproto.repo.deleteRecord`, {
+      method: 'POST',
+      json: { repo: session.did, collection: COLLECTION_ITEM_NSID, rkey: it.rkey },
+    });
+  }
 }
 
 export function collectionDisplay(col: PostCollection): string {
