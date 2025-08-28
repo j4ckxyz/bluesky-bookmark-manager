@@ -325,21 +325,24 @@ class BlueskyService {
 
   async getPosts(uris: string[]): Promise<BlueskyPost[]> {
     try {
-      const allPosts: BlueskyPost[] = [];
+      if (!uris.length) return [];
+      const requests: Promise<BlueskyPost[]>[] = [];
       for (let i = 0; i < uris.length; i += 25) {
         const chunk = uris.slice(i, i + 25);
-        const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts');
-        chunk.forEach((u) => url.searchParams.append('uris', u));
-        const response = await fetch(url.toString(), { method: 'GET' });
-        if (!response.ok) {
-          console.error('Failed to fetch posts chunk:', response.status, response.statusText);
-          continue;
-        }
-        const data = await response.json();
-        const posts = (data.posts || []) as BlueskyPost[];
-        allPosts.push(...posts);
+        requests.push((async () => {
+          const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts');
+          chunk.forEach((u) => url.searchParams.append('uris', u));
+          const response = await fetch(url.toString(), { method: 'GET' });
+          if (!response.ok) {
+            console.error('Failed to fetch posts chunk:', response.status, response.statusText);
+            return [] as BlueskyPost[];
+          }
+          const data = await response.json();
+          return (data.posts || []) as BlueskyPost[];
+        })());
       }
-      return allPosts;
+      const results = await Promise.all(requests);
+      return results.flat();
     } catch (error) {
       console.error('Error fetching posts:', error);
       return [];

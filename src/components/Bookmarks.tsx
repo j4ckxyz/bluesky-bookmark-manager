@@ -26,6 +26,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
   // Local cache buffer (full, sorted), we only render a chunk at a time for snappy paint
   const allCachedRef = useRef<BlueskyPost[]>([]);
   const cacheIndexRef = useRef<number>(0); // next unread index in allCachedRef
+  const renderedUrisRef = useRef<Set<string>>(new Set()); // prevent duplicates in UI
   const CHUNK = 20;
   // Follow prompt removed to keep scopes limited to this app's lexicon only
   // const [showFollowPrompt, setShowFollowPrompt] = useState(false);
@@ -42,14 +43,24 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
 
   const appendFromLocalBuffer = useCallback((count: number = CHUNK) => {
     const all = allCachedRef.current;
-    const start = cacheIndexRef.current;
-    if (start >= all.length) return false;
-    const end = Math.min(start + count, all.length);
-    const nextSlice = all.slice(start, end);
-    if (nextSlice.length === 0) return false;
-    setBookmarks(prev => prev.length === 0 ? nextSlice : [...prev, ...nextSlice]);
-    cacheIndexRef.current = end;
-    return end < all.length; // whether more remains locally
+    let i = cacheIndexRef.current;
+    if (i >= all.length) return false;
+    const toAdd: BlueskyPost[] = [];
+    while (i < all.length && toAdd.length < count) {
+      const p = all[i];
+      if (!renderedUrisRef.current.has(p.uri)) {
+        renderedUrisRef.current.add(p.uri);
+        toAdd.push(p);
+      }
+      i++;
+    }
+    if (toAdd.length === 0) {
+      cacheIndexRef.current = i;
+      return i < all.length; // continue scanning later
+    }
+    setBookmarks(prev => prev.length === 0 ? toAdd : [...prev, ...toAdd]);
+    cacheIndexRef.current = i;
+    return i < all.length; // whether more remains locally
   }, []);
 
   const hydrateFromCacheThenRefresh = useCallback(async () => {
@@ -60,6 +71,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
       bookmarkTimesRef.current = { ...cached.bookmarkTimes };
       allCachedRef.current = sortByBookmarkTime(cached.posts);
       cacheIndexRef.current = 0;
+      renderedUrisRef.current = new Set();
       setIsLoading(false); // don't block UI if we have cache
       appendFromLocalBuffer(CHUNK);
     } else {
@@ -80,6 +92,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
       // If nothing visible yet (no cache before), show first chunk now
       if (bookmarks.length === 0) {
         cacheIndexRef.current = 0;
+        renderedUrisRef.current = new Set();
         setIsLoading(false);
         appendFromLocalBuffer(CHUNK);
       }
@@ -102,6 +115,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     // Reset local buffer on session change
     allCachedRef.current = [];
     cacheIndexRef.current = 0;
+  renderedUrisRef.current = new Set();
     setBookmarks([]);
     setCursor(undefined);
     hydrateFromCacheThenRefresh();
