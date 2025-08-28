@@ -217,32 +217,10 @@ class BlueskyService {
   return { posts, cursor: nextCursor, bookmarkTimes };
     };
 
-    // First: CORS-friendly AppView search API
+    // First: use our proxy function to avoid CORS and enforce pinned-only query
     try {
-      const url = new URL('https://public.api.bsky.app/api/v1/app.bsky.feed.searchPosts');
-      const query = `from:${handle.replace(/^@/, '')}`;
-      url.searchParams.set('q', query);
-      // Some gateways may expect 'query' instead of 'q'; set both defensively
-      url.searchParams.set('query', query);
-      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
-      if (cursor) url.searchParams.set('cursor', cursor);
-      const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
-      if (resp.ok) {
-        const data = await resp.json();
-        const nextCursor: string | undefined = data?.cursor;
-        const items = (data?.posts ?? data?.records ?? []) as any[];
-        return await buildFromReplyItems(items, nextCursor);
-      }
-      console.warn('API v1 search not available, status:', resp.status, resp.statusText);
-    } catch (e) {
-      console.warn('API v1 search failed:', e);
-    }
-
-    // Second: legacy /xrpc search
-    try {
-      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
-      const query = `from:${handle.replace(/^@/, '')}`;
-      url.searchParams.set('q', query);
+      const url = new URL('/api/searchPinned', window.location.origin);
+      url.searchParams.set('handle', handle.replace(/^@/, ''));
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
       if (cursor) url.searchParams.set('cursor', cursor);
       const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
@@ -252,9 +230,9 @@ class BlueskyService {
         const items = (data?.posts ?? []) as any[];
         return await buildFromReplyItems(items, nextCursor);
       }
-      console.warn('XRPC search not available, status:', resp.status, resp.statusText);
+      console.warn('Pinned proxy not available, status:', resp.status, resp.statusText);
     } catch (e) {
-      console.warn('XRPC search failed:', e);
+      console.warn('Pinned proxy failed:', e);
     }
 
     // Finally: getAuthorFeed (posts_with_replies) and keep only replies
