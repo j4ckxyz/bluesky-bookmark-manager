@@ -1,0 +1,17 @@
+{
+  "name": "Bluesky Bookmarks",
+  "short_name": "Bookmarks",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0ea5e9",
+  "description": "View your Bluesky bookmarks (📌 replies) with collections.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
