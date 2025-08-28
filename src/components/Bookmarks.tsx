@@ -48,18 +48,23 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     const toAdd: BlueskyPost[] = [];
     while (i < all.length && toAdd.length < count) {
       const p = all[i];
-      if (!renderedUrisRef.current.has(p.uri)) {
-        renderedUrisRef.current.add(p.uri);
-        toAdd.push(p);
-      }
+      toAdd.push(p);
       i++;
     }
-    if (toAdd.length === 0) {
-      cacheIndexRef.current = i;
-      return i < all.length; // continue scanning later
-    }
-    setBookmarks(prev => prev.length === 0 ? toAdd : [...prev, ...toAdd]);
     cacheIndexRef.current = i;
+    setBookmarks(prev => {
+      const combined = prev.length === 0 ? toAdd : [...prev, ...toAdd];
+      const seen = new Set<string>();
+      const deduped = [];
+      for (const p of combined) {
+        if (!seen.has(p.uri)) {
+          seen.add(p.uri);
+          deduped.push(p);
+        }
+      }
+      renderedUrisRef.current = new Set(deduped.map(p => p.uri));
+      return deduped;
+    });
     return i < all.length; // whether more remains locally
   }, []);
 
