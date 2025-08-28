@@ -133,19 +133,49 @@ export function PostCard({ post }: PostCardProps) {
     if (e.$type?.startsWith('app.bsky.embed.video') && (e.playlist || e.video)) {
       const videoSrc = e.playlist || e.video;
       const poster = e.thumbnail || e.poster;
+      const isHLS = videoSrc.includes('.m3u8') || videoSrc.includes('playlist');
+      const [videoError, setVideoError] = useState(false);
+
       return (
         <div className="relative">
-          <video
-            src={videoSrc}
-            poster={poster}
-            controls
-            playsInline
-            preload="metadata"
-            className="rounded-lg w-full max-h-96 object-contain"
-            style={{ maxHeight: '24rem' }}
-          >
-            Your browser does not support the video tag.
-          </video>
+          {!videoError ? (
+            <video
+              src={videoSrc}
+              poster={poster}
+              controls
+              playsInline
+              preload="metadata"
+              className="rounded-lg w-full max-h-96 object-contain"
+              style={{ maxHeight: '24rem' }}
+              {...(isHLS && { type: 'application/x-mpegURL' })}
+              onError={() => setVideoError(true)}
+            >
+              Your browser does not support the video tag.
+            </video>
+          ) : (
+            <div className="relative">
+              <img src={poster} alt="video" className="rounded-lg object-cover w-full" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <a
+                  href={getPostUrl(post)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-black/50 rounded-full p-3 hover:bg-black/70 transition-colors"
+                  title="View video on Bluesky"
+                >
+                  <Play className="h-6 w-6 text-white" />
+                </a>
+              </div>
+              <div className="absolute bottom-2 left-2 text-xs text-white bg-black/50 px-2 py-1 rounded">
+                View on Bluesky
+              </div>
+            </div>
+          )}
+          {isHLS && !videoError && (
+            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              HLS video - may require browser support
+            </div>
+          )}
         </div>
       );
     }
