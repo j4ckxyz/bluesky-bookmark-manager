@@ -129,7 +129,28 @@ export function PostCard({ post }: PostCardProps) {
       );
     }
 
-    // app.bsky.embed.video (view) — render poster with play icon
+    // app.bsky.embed.video (view) — render video player for inline playback
+    if (e.$type?.startsWith('app.bsky.embed.video') && (e.playlist || e.video)) {
+      const videoSrc = e.playlist || e.video;
+      const poster = e.thumbnail || e.poster;
+      return (
+        <div className="relative">
+          <video
+            src={videoSrc}
+            poster={poster}
+            controls
+            playsInline
+            preload="metadata"
+            className="rounded-lg w-full max-h-96 object-contain"
+            style={{ maxHeight: '24rem' }}
+          >
+            Your browser does not support the video tag.
+          </video>
+        </div>
+      );
+    }
+
+    // Fallback: poster with play icon if no video src
     if (e.$type?.startsWith('app.bsky.embed.video') && (e.thumbnail || e.poster)) {
       const thumb = e.thumbnail || e.poster;
       return (
