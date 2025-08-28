@@ -197,7 +197,9 @@ class BlueskyService {
       const seen = new Set<string>();
       for (const post of items) {
         const parentUri: string | undefined = post?.record?.reply?.parent?.uri;
-        if (!parentUri) continue; // only replies
+  const text: string | undefined = post?.record?.text;
+  if (!parentUri) continue; // only replies
+  if (!text || !text.includes('📌')) continue; // only replies that contain our pin emoji
         if (!seen.has(parentUri)) {
           seen.add(parentUri);
           parentUris.push(parentUri);
@@ -235,7 +237,7 @@ class BlueskyService {
       console.warn('Pinned proxy failed:', e);
     }
 
-    // Finally: getAuthorFeed (posts_with_replies) and keep only replies
+    // Finally: getAuthorFeed (posts_with_replies) and keep only replies that include 📌
     try {
       const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed');
       url.searchParams.set('actor', handle);
@@ -249,7 +251,9 @@ class BlueskyService {
       }
       const data = await resp.json();
       const nextCursor: string | undefined = data?.cursor;
-      const items = ((data?.feed ?? []) as Array<{ post: any }>).map((it) => it.post);
+      const items = ((data?.feed ?? []) as Array<{ post: any }>)
+        .map((it) => it.post)
+        .filter((post) => !!post?.record?.reply?.parent?.uri && (post?.record?.text || '').includes('📌'));
       return await buildFromReplyItems(items, nextCursor);
     } catch (error) {
       console.error('Error fetching author feed replies:', error);
