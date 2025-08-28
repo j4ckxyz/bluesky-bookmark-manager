@@ -25,7 +25,6 @@
   "scripts": {
     "dev": "vite --host",
     "start": "vite --host",
-  "prebuild": "node scripts/generate-icons.mjs",
   "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -55,7 +54,6 @@
     "globals": "^16.3.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
-  "sharp": "^0.33.4",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2"
