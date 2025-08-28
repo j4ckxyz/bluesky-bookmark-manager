@@ -2,6 +2,7 @@
 /assets/*                     /assets/:splat                    200
 /icons/*                      /icons/:splat                     200
 /sw.js                        /sw.js                            200
+/sw-register.js               /sw-register.js                   200
 /manifest.webmanifest         /manifest.webmanifest             200
 /oauth-client-metadata.json   /oauth-client-metadata.json       200
 /robots.txt                   /robots.txt                       200

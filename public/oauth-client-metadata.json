@@ -4,9 +4,7 @@
   "application_type": "web",
   "scope": "atproto com.atproto.repo.write transition:generic",
   "redirect_uris": [
-    "https://bookmarks.atproto.uk/auth/callback",
-  "http://127.0.0.1:5173/auth/callback",
-  "http://127.0.0.1:5174/auth/callback"
+  "https://bookmarks.atproto.uk/auth/callback"
   ],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
