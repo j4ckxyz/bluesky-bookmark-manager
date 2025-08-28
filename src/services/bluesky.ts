@@ -186,11 +186,12 @@ class BlueskyService {
     }
   }
 
-  // Search-based loader: finds replies from the user containing the 📌 emoji, then
-  // returns the parent posts (targets) and a bookmarkTimes map (parentUri -> reply.createdAt)
+  // Loader: list author's latest replies via AppView search (fast, CORS-friendly),
+  // then fall back to /xrpc search, then author feed. Returns parent posts of replies
+  // and a bookmarkTimes map (parentUri -> reply.createdAt)
   async searchPinnedReplyPage(handle: string, cursor?: string, limit: number = 50): Promise<{ posts: BlueskyPost[]; cursor?: string; bookmarkTimes: Record<string, string>; }> {
     // Helper to construct result from an array of reply-like posts
-  const buildFromReplyItems = async (items: any[], nextCursor?: string) => {
+    const buildFromReplyItems = async (items: any[], nextCursor?: string) => {
       const parentUris: string[] = [];
       const bookmarkTimes: Record<string, string> = {};
       const seen = new Set<string>();
@@ -216,29 +217,47 @@ class BlueskyService {
   return { posts, cursor: nextCursor, bookmarkTimes };
     };
 
-    // First attempt: AppView search (may be blocked by CORS or disabled)
+    // First: CORS-friendly AppView search API
+    try {
+      const url = new URL('https://public.api.bsky.app/api/v1/app.bsky.feed.searchPosts');
+      const query = `from:${handle.replace(/^@/, '')}`;
+      url.searchParams.set('q', query);
+      // Some gateways may expect 'query' instead of 'q'; set both defensively
+      url.searchParams.set('query', query);
+      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+      if (cursor) url.searchParams.set('cursor', cursor);
+      const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
+      if (resp.ok) {
+        const data = await resp.json();
+        const nextCursor: string | undefined = data?.cursor;
+        const items = (data?.posts ?? data?.records ?? []) as any[];
+        return await buildFromReplyItems(items, nextCursor);
+      }
+      console.warn('API v1 search not available, status:', resp.status, resp.statusText);
+    } catch (e) {
+      console.warn('API v1 search failed:', e);
+    }
+
+    // Second: legacy /xrpc search
     try {
       const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
       const query = `from:${handle.replace(/^@/, '')}`;
       url.searchParams.set('q', query);
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
       if (cursor) url.searchParams.set('cursor', cursor);
-
-      const resp = await fetch(url.toString(), { method: 'GET' });
+      const resp = await fetch(url.toString(), { method: 'GET', headers: { 'Accept': 'application/json' } });
       if (resp.ok) {
         const data = await resp.json();
         const nextCursor: string | undefined = data?.cursor;
         const items = (data?.posts ?? []) as any[];
         return await buildFromReplyItems(items, nextCursor);
       }
-      // Non-OK (e.g., 403) — fall through to author feed
-      console.warn('Search API not available, falling back to author feed:', resp.status, resp.statusText);
-    } catch (error) {
-      // Network/CORS error — fall back
-      console.warn('Search API failed, falling back to author feed:', error);
+      console.warn('XRPC search not available, status:', resp.status, resp.statusText);
+    } catch (e) {
+      console.warn('XRPC search failed:', e);
     }
 
-    // Fallback: getAuthorFeed (posts_with_replies) and keep only replies
+    // Finally: getAuthorFeed (posts_with_replies) and keep only replies
     try {
       const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed');
       url.searchParams.set('actor', handle);
