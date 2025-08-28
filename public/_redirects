@@ -4,6 +4,8 @@
 /sw-register.js               /sw-register.js                   200
 /manifest.webmanifest         /manifest.webmanifest             200
 /oauth-client-metadata.json   /oauth-client-metadata.json       200
+#/oauth directory passthrough to avoid SPA fallback for metadata
+/oauth/*                      /oauth/:splat                     200
 /robots.txt                   /robots.txt                       200
 /index.html                   /index.html                       200
 
