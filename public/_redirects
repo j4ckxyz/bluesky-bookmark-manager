@@ -1,2 +1,10 @@
-# SPA fallback for client-side routing
-/*    /index.html   200
+# Serve static assets and important files as-is
+/assets/*                     /assets/:splat                    200
+/sw.js                        /sw.js                            200
+/manifest.webmanifest         /manifest.webmanifest             200
+/oauth-client-metadata.json   /oauth-client-metadata.json       200
+/robots.txt                   /robots.txt                       200
+/index.html                   /index.html                       200
+
+# SPA fallback for client-side routing (catch-all)
+/*                            /index.html                       200

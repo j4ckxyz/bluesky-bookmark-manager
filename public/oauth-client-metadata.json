@@ -4,8 +4,8 @@
   "application_type": "web",
   "redirect_uris": [
     "https://bookmarks.atproto.uk/auth/callback",
-    "http://127.0.0.1:5173/auth/callback",
-    "http://localhost:5173/auth/callback"
+  "http://127.0.0.1:5173/auth/callback",
+  "http://127.0.0.1:5174/auth/callback"
   ],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
