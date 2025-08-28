@@ -1,6 +1,7 @@
 import { ExternalLink, Heart, MessageCircle, Repeat2, Play, Plus } from 'lucide-react';
 import type { BlueskyPost } from '../types';
-import { listCollections, addPostToCollection, type PostCollection } from '../services/collections';
+import { listCollections, addPostToCollection, createCollection, type PostCollection } from '../services/collections';
+import { authService } from '../services/auth';
 import { useEffect, useState } from 'react';
 
 interface PostCardProps {
@@ -10,10 +11,26 @@ interface PostCardProps {
 export function PostCard({ post }: PostCardProps) {
   const [chooserOpen, setChooserOpen] = useState(false);
   const [collections, setCollections] = useState<PostCollection[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState('#3b82f6');
+  const [newErr, setNewErr] = useState('');
+  const [hasWrite, setHasWrite] = useState(false);
+  const [handle, setHandle] = useState<string>('');
 
   useEffect(() => {
     // prefetch lightly; do not spam PDS
     listCollections().then(setCollections).catch(()=>{});
+    try {
+      const sess = authService.getStoredSession();
+      if (sess?.handle) setHandle(sess.handle);
+      const opt = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]') as string[];
+      const granted = (sessionStorage.getItem('oauth_granted_scope') || '') as string;
+      const needA = 'repo:uk.atproto.bookmark.list';
+      const needB = 'repo:uk.atproto.bookmark.listItem';
+      const has = (arr: string[]) => arr.includes(needA) && arr.includes(needB);
+      setHasWrite(has(opt) || (granted.includes(needA) && granted.includes(needB)));
+    } catch {}
   }, []);
 
   async function onAddTo(colUri: string) {
@@ -22,6 +39,30 @@ export function PostCard({ post }: PostCardProps) {
       setChooserOpen(false);
     } catch (e) {
       // swallow for now; could toast
+    }
+  }
+
+  async function onCreateAndAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setNewErr('');
+    try {
+      if (!hasWrite) {
+        if (handle) await authService.requestWriteForCollections(handle);
+        return; // user will return post-auth
+      }
+      setCreating(true);
+      const col = await createCollection(newName.trim(), newColor);
+      setCollections(prev => [col, ...prev]);
+      // auto-add current post to the new collection
+      await addPostToCollection(col.uri, post.uri);
+      setNewName('');
+      setNewColor('#3b82f6');
+      setChooserOpen(false);
+    } catch (e: any) {
+      setNewErr(e?.message || 'Failed to create');
+    } finally {
+      setCreating(false);
     }
   }
   const formatDate = (dateString: string) => {
@@ -223,10 +264,18 @@ export function PostCard({ post }: PostCardProps) {
           </div>
           {chooserOpen && (
             <div className="mt-2 p-2 rounded border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs text-gray-600 dark:text-gray-300">Choose a collection</div>
+                <button
+                  title="Create new collection"
+                  onClick={() => { /* toggle create inline row */ setNewErr(''); setNewName(n => n); }}
+                  className="px-1.5 py-0.5 text-xs rounded border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >+ New</button>
+              </div>
               {collections.length === 0 ? (
                 <div className="text-sm text-gray-500 dark:text-gray-400">No collections yet.</div>
               ) : (
-                <div className="grid sm:grid-cols-2 gap-2">
+                <div className="grid sm:grid-cols-2 gap-2 mb-2">
                   {collections.map(c => (
                     <button key={c.uri} onClick={()=>onAddTo(c.uri)} className="text-left px-3 py-2 rounded border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                       <div className="flex items-center space-x-2">
@@ -237,6 +286,15 @@ export function PostCard({ post }: PostCardProps) {
                   ))}
                 </div>
               )}
+              <form onSubmit={onCreateAndAdd} className="flex items-center gap-2 border-t border-gray-200 dark:border-gray-800 pt-2">
+                <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="New collection name" className="flex-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs" />
+                <input type="color" value={newColor} onChange={e=>setNewColor(e.target.value)} title="Color" className="w-6 h-6 p-0 border-0 bg-transparent" />
+                <button type="submit" disabled={creating} className="px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50">{creating ? 'Creating…' : 'Create & add'}</button>
+                {!hasWrite && (
+                  <button type="button" onClick={async ()=>{ if (handle) await authService.requestWriteForCollections(handle); }} className="px-2 py-1 rounded bg-indigo-600 text-white text-xs">Enable writing</button>
+                )}
+              </form>
+              {newErr && <div className="mt-1 text-xs text-red-600 dark:text-red-400">{newErr}</div>}
             </div>
           )}
         </div>

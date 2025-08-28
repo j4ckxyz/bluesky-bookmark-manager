@@ -109,7 +109,8 @@ async function xrpc(path: string, init?: RequestInit & { json?: any }): Promise<
             const client = createLocalhostATProtoOAuthClient(issuer, redirectUri, storedScopes);
             const body = new URLSearchParams();
             body.set('grant_type', 'refresh_token');
-            body.set('client_id', (client as any).clientId || '');
+            const storedClientId = sessionStorage.getItem('oauth_client_id') || '';
+            body.set('client_id', storedClientId || (client as any).clientId || '');
             body.set('refresh_token', refreshJwt);
             body.set('resource', pds);
             const tokenReq = new Request(tokenEndpoint, { method: 'POST', body });
@@ -190,7 +191,16 @@ export async function createCollection(name: string, color: string): Promise<Pos
     method: 'POST',
     json: { repo: session.did, collection: COLLECTION_NSID, record },
   });
-  if (!res.ok) throw new Error('Failed to create collection');
+  if (!res.ok) {
+    try {
+      const j = await res.clone().json();
+      const msg = (j?.error_description || j?.message || '').toString();
+      if (res.status === 403 || /insufficient[_\s-]?scope/i.test(msg)) {
+        throw new Error('Write access not granted. Enable writing (repo:uk.atproto.bookmark.list + repo:uk.atproto.bookmark.listItem) from the banner above.');
+      }
+    } catch {}
+    throw new Error('Failed to create collection');
+  }
   const json = await res.json();
   const uri = json?.uri as string;
   const cid = json?.cid as string;
@@ -253,7 +263,16 @@ export async function addPostToCollection(collectionUri: string, postUri: string
     method: 'POST',
     json: { repo: session.did, collection: COLLECTION_ITEM_NSID, record },
   });
-  if (!res.ok) throw new Error('Failed to add item');
+  if (!res.ok) {
+    try {
+      const j = await res.clone().json();
+      const msg = (j?.error_description || j?.message || '').toString();
+      if (res.status === 403 || /insufficient[_\s-]?scope/i.test(msg)) {
+        throw new Error('Write access not granted. Enable writing (repo:uk.atproto.bookmark.list + repo:uk.atproto.bookmark.listItem) from the banner above.');
+      }
+    } catch {}
+    throw new Error('Failed to add item');
+  }
   const json = await res.json();
   const uri = json?.uri as string;
   return { uri, rkey: uri.split('/').pop() as string, value: record };

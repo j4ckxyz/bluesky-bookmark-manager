@@ -364,6 +364,10 @@ export class ATProtoOAuthClient {
     this.keyPair = keyPair;
   }
 
+  public getClientId(): string {
+    return this.clientId;
+  }
+
   public async createAuthorizationURL(
     pushedAuthorizationRequestEndpoint: string,
     authorizationEndpoint: string,
@@ -506,6 +510,11 @@ function parseOAuthTokensResult(result: unknown): ATProtoOAuthTokens {
     accessTokenExpiresAt,
     refreshToken,
   };
+  if (resultParser.has("scope")) {
+    try {
+      (tokens as any).scope = resultParser.getString("scope");
+    } catch {}
+  }
   return tokens;
 }
 
@@ -514,6 +523,7 @@ export interface ATProtoOAuthTokens {
   accessToken: string;
   accessTokenExpiresAt: Date | null;
   refreshToken: string | null;
+  scope?: string | null;
 }
 
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {

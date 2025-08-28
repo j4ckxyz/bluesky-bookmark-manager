@@ -1,4 +1,7 @@
 import type { BlueskyPost } from '../types';
+import { parsePostInputToAtUri } from './collections';
+import { joinURIBaseAndPath, createDPOP, sha256 } from '../lib/atproto';
+import { encodeBase64urlNoPadding } from '@oslojs/encoding';
 
 class BlueskyService {
   async getProfile(actor: string): Promise<{ did: string; handle: string; displayName?: string; avatar?: string; description?: string } | null> {
@@ -115,6 +118,127 @@ class BlueskyService {
 
     const posts = await this.getPosts(parentUris);
     return { posts, cursor: nextCursor, bookmarkTimes };
+  }
+
+  // Post a 📌 reply to the given Bluesky URL or at:// post
+  async pinByUrl(input: string): Promise<boolean> {
+    try {
+      const atUri = await parsePostInputToAtUri(input);
+      const target = await this.getPost(atUri);
+      if (!target) throw new Error('Target not found');
+      const raw = sessionStorage.getItem('user_session');
+      if (!raw) throw new Error('Not authenticated');
+      const session = JSON.parse(raw);
+      const pds = sessionStorage.getItem('user_pds');
+      if (!pds) throw new Error('Missing PDS');
+      // Build record for reply to root or parent; here we reply to the post itself
+      // at://did/app.bsky.feed.post/<rkey>
+      const parts = atUri.split('/');
+  const collection = parts[3];
+      if (collection !== 'app.bsky.feed.post') {
+        // If target is a record embed subject; still reply with parent given by uri
+      }
+      const record = {
+        $type: 'app.bsky.feed.post',
+        text: '📌',
+        createdAt: new Date().toISOString(),
+        reply: {
+          root: { uri: atUri, cid: target.cid },
+          parent: { uri: atUri, cid: target.cid },
+        },
+      } as any;
+      // Use repo createRecord with DPoP
+      const url = joinURIBaseAndPath(pds, '/xrpc/com.atproto.repo.createRecord');
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/json');
+      headers.set('Accept', 'application/json');
+      headers.set('Authorization', `DPoP ${session.accessJwt}`);
+      // DPoP proof with 'ath' binding to access token
+      const jwk = JSON.parse(sessionStorage.getItem('dpop_key_pair') || '{}');
+      const privateKey = await crypto.subtle.importKey('jwk', jwk.privateKey, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+      const publicKey = await crypto.subtle.importKey('jwk', jwk.publicKey, { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+      const keyPair: CryptoKeyPair = { privateKey, publicKey } as any;
+      const athBytes = await sha256(new TextEncoder().encode(session.accessJwt));
+      const ath = encodeBase64urlNoPadding(athBytes);
+      const dpopNonce = sessionStorage.getItem('dpop_nonce') || null;
+      headers.set('DPoP', await createDPOP(keyPair, 'POST', url, dpopNonce, { ath }));
+      const body = { repo: session.did, collection: 'app.bsky.feed.post', record };
+      let res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      const headerNonce = res.headers.get('DPoP-Nonce');
+      if (headerNonce) sessionStorage.setItem('dpop_nonce', headerNonce);
+      if (res.status === 400 || res.status === 401) {
+        try {
+          const data = await res.clone().json().catch(async () => ({ raw: await res.clone().text() }));
+          const desc = (data?.error_description || data?.message || '').toString();
+          const needsNonce = desc.includes('use_dpop_nonce') || desc.includes('nonce');
+          if (needsNonce) {
+            const headers2 = new Headers(headers);
+            headers2.set('DPoP', await createDPOP(keyPair, 'POST', url, sessionStorage.getItem('dpop_nonce') || null, { ath }));
+            res = await fetch(url, { method: 'POST', headers: headers2, body: JSON.stringify(body) });
+          }
+        } catch {}
+      }
+      if (!res.ok) return false;
+      return true;
+    } catch (e) {
+      console.error('pinByUrl failed', e);
+      return false;
+    }
+  }
+
+  // Search-based loader: finds replies from the user containing the 📌 emoji, then
+  // returns the parent posts (targets) and a bookmarkTimes map (parentUri -> reply.createdAt)
+  async searchPinnedReplyPage(handle: string, cursor?: string, limit: number = 50): Promise<{ posts: BlueskyPost[]; cursor?: string; bookmarkTimes: Record<string, string>; }> {
+    try {
+      const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
+      // Query: only posts from this user with the pushpin emoji
+      const query = `from:${handle.replace(/^@/, '')} 📌`;
+      url.searchParams.set('q', query);
+      url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
+      if (cursor) url.searchParams.set('cursor', cursor);
+
+      const resp = await fetch(url.toString(), { method: 'GET' });
+      if (!resp.ok) {
+        console.error('Failed to search posts:', resp.status, resp.statusText);
+        return { posts: [], cursor: undefined, bookmarkTimes: {} };
+      }
+      const data = await resp.json();
+      const nextCursor: string | undefined = data?.cursor;
+      const items = (data?.posts ?? []) as any[];
+
+      const parentUris: string[] = [];
+      const bookmarkTimes: Record<string, string> = {};
+      const seen = new Set<string>();
+      for (const post of items) {
+        const text: string | undefined = post?.record?.text;
+        const parentUri: string | undefined = post?.record?.reply?.parent?.uri;
+        if (!parentUri) continue; // only replies
+        // text should contain 📌 already due to query, but keep guard
+        if (text && !text.includes('📌')) continue;
+        if (!seen.has(parentUri)) {
+          seen.add(parentUri);
+          parentUris.push(parentUri);
+          const createdAt: string | undefined = post?.record?.createdAt;
+          if (createdAt) bookmarkTimes[parentUri] = createdAt;
+        }
+      }
+
+      if (parentUris.length === 0) {
+        return { posts: [], cursor: nextCursor, bookmarkTimes };
+      }
+
+      const posts: BlueskyPost[] = await this.getPosts(parentUris);
+      // Sort by bookmark time desc
+      posts.sort((a, b) => {
+        const ta = new Date(bookmarkTimes[a.uri] ?? a.record.createdAt).getTime();
+        const tb = new Date(bookmarkTimes[b.uri] ?? b.record.createdAt).getTime();
+        return tb - ta;
+      });
+      return { posts, cursor: nextCursor, bookmarkTimes };
+    } catch (error) {
+      console.error('Error searching pinned replies:', error);
+      return { posts: [], cursor: undefined, bookmarkTimes: {} };
+    }
   }
 
   async getPinnedReplyParentUrisByHandle(handle: string, maxPages: number = 20): Promise<string[]> {

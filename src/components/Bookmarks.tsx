@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bookmark, LogOut, RefreshCw, Search, Diff } from 'lucide-react';
+import { Bookmark, LogOut, RefreshCw, Search } from 'lucide-react';
 import { PostCard } from './PostCard';
 import { authService } from '../services/auth';
 import { blueskyService } from '../services/bluesky';
 import type { BlueskyPost, UserSession } from '../types';
-import { getCache, mergeIntoCache, replaceCache } from '../services/bookmarkCache';
+import { getCache, mergeIntoCache } from '../services/bookmarkCache';
 // import { followCreator } from '../services/follow.ts';
 
 interface BookmarksProps {
@@ -13,47 +13,77 @@ interface BookmarksProps {
 }
 
 export function Bookmarks({ session, onLogout }: BookmarksProps) {
-  const [bookmarks, setBookmarks] = useState<BlueskyPost[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [bookmarks, setBookmarks] = useState<BlueskyPost[]>([]); // visible list
+  const [isLoading, setIsLoading] = useState(true); // only true if no cache yet
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const bookmarkTimesRef = useRef<Record<string, string>>({});
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
-  const [isFetchingAll, setIsFetchingAll] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Local cache buffer (full, sorted), we only render a chunk at a time for snappy paint
+  const allCachedRef = useRef<BlueskyPost[]>([]);
+  const cacheIndexRef = useRef<number>(0); // next unread index in allCachedRef
+  const CHUNK = 20;
   // Follow prompt removed to keep scopes limited to this app's lexicon only
   // const [showFollowPrompt, setShowFollowPrompt] = useState(false);
   // const [creator, setCreator] = useState<{ did: string; handle: string; displayName?: string; avatar?: string; description?: string } | null>(null);
 
-  const loadBookmarks = async () => {
-    setIsLoading(true);
-    setError('');
+  const sortByBookmarkTime = useCallback((arr: BlueskyPost[]) => {
+    const times = bookmarkTimesRef.current;
+    return arr.slice().sort((a, b) => {
+      const ta = new Date(times[a.uri] ?? a.record.createdAt).getTime();
+      const tb = new Date(times[b.uri] ?? b.record.createdAt).getTime();
+      return tb - ta;
+    });
+  }, []);
 
+  const appendFromLocalBuffer = useCallback((count: number = CHUNK) => {
+    const all = allCachedRef.current;
+    const start = cacheIndexRef.current;
+    if (start >= all.length) return false;
+    const end = Math.min(start + count, all.length);
+    const nextSlice = all.slice(start, end);
+    if (nextSlice.length === 0) return false;
+    setBookmarks(prev => prev.length === 0 ? nextSlice : [...prev, ...nextSlice]);
+    cacheIndexRef.current = end;
+    return end < all.length; // whether more remains locally
+  }, []);
+
+  const hydrateFromCacheThenRefresh = useCallback(async () => {
+    setError('');
+    // 1) Hydrate from cache instantly (visible chunk only)
+    const cached = getCache(session.handle);
+    if (cached && cached.posts.length) {
+      bookmarkTimesRef.current = { ...cached.bookmarkTimes };
+      allCachedRef.current = sortByBookmarkTime(cached.posts);
+      cacheIndexRef.current = 0;
+      setIsLoading(false); // don't block UI if we have cache
+      appendFromLocalBuffer(CHUNK);
+    } else {
+      setIsLoading(true);
+    }
+
+    // 2) Kick off a background refresh of the first page (does not block UI)
     try {
-      // 1) Hydrate from cache immediately if available
-      const cached = getCache(session.handle);
-      if (cached && cached.posts.length) {
-        bookmarkTimesRef.current = { ...cached.bookmarkTimes };
-        const sorted = cached.posts.slice().sort((a, b) => {
-          const ta = new Date(bookmarkTimesRef.current[a.uri] ?? a.record.createdAt).getTime();
-          const tb = new Date(bookmarkTimesRef.current[b.uri] ?? b.record.createdAt).getTime();
-          return tb - ta;
-        });
-        setBookmarks(sorted);
+      setIsRefreshing(true);
+  const { posts, cursor: next, bookmarkTimes: times } = await blueskyService.searchPinnedReplyPage(session.handle, undefined, 50);
+      // Merge times, rebuild local sorted buffer, but avoid clearing what's already visible; append new items when user scrolls
+      bookmarkTimesRef.current = { ...(cached?.bookmarkTimes ?? {}), ...times };
+      const mergedSet = new Map<string, BlueskyPost>(allCachedRef.current.map(p => [p.uri, p]));
+      for (const p of posts) mergedSet.set(p.uri, p);
+      const mergedArr = Array.from(mergedSet.values());
+      const sorted = sortByBookmarkTime(mergedArr);
+      allCachedRef.current = sorted;
+      // If nothing visible yet (no cache before), show first chunk now
+      if (bookmarks.length === 0) {
+        cacheIndexRef.current = 0;
+        setIsLoading(false);
+        appendFromLocalBuffer(CHUNK);
       }
-      // First page of results
-  const { posts, cursor: next, bookmarkTimes: times } = await blueskyService.getPinnedReplyPage(session.handle, undefined, 100);
-  bookmarkTimesRef.current = { ...(cached?.bookmarkTimes ?? {}), ...times };
-  // state not needed; ref drives sorting
-      // Sort by bookmark time desc (most recent first)
-      const sorted = posts.slice().sort((a, b) => {
-        const ta = new Date(bookmarkTimesRef.current[a.uri] ?? a.record.createdAt).getTime();
-        const tb = new Date(bookmarkTimesRef.current[b.uri] ?? b.record.createdAt).getTime();
-        return tb - ta;
-      });
-      setBookmarks(sorted);
-      // Merge fresh page into cache and prune recent window (last 7 days) for removed pins
+      // Write to cache and prune a 7-day window for removed pins
       try {
         const recentCutoffISO = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const observed = new Set(posts.map(p => p.uri));
@@ -63,54 +93,39 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load bookmarks');
     } finally {
-      setIsLoading(false);
+      setIsRefreshing(false);
     }
-  };
-  const fetchAll = async () => {
-    if (isFetchingAll) return;
-    setIsFetchingAll(true);
-    setError('');
-    try {
-  const { posts, bookmarkTimes: times } = await blueskyService.getAllPinnedReplyPostsByHandle(session.handle, 100, 2000);
-  bookmarkTimesRef.current = { ...times };
-      setBookmarks(posts);
-  // Replace cache completely with full set
-  try { replaceCache(session.handle, posts, times); } catch {}
-      setCursor(undefined); // fully loaded
-    } catch (e) {
-      console.error('Failed to fetch all bookmarks', e);
-      setError('Failed to fetch all bookmarks');
-    } finally {
-      setIsFetchingAll(false);
-    }
-  };
+  }, [session.handle, sortByBookmarkTime, appendFromLocalBuffer, bookmarks.length]);
+  // Removed Fetch All flow; search-based paging is used instead.
 
   useEffect(() => {
-    loadBookmarks();
+    // Reset local buffer on session change
+    allCachedRef.current = [];
+    cacheIndexRef.current = 0;
+    setBookmarks([]);
+    setCursor(undefined);
+    hydrateFromCacheThenRefresh();
   }, [session]);
 
   // Follow prompt removed (non-lexicon write)
 
   const loadMore = useCallback(async () => {
+    // First, drain local buffer in CHUNKs before hitting the network
+    if (appendFromLocalBuffer(CHUNK)) return;
     if (!cursor || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const { posts, cursor: next, bookmarkTimes: times } = await blueskyService.getPinnedReplyPage(session.handle, cursor, 100);
+      const { posts, cursor: next, bookmarkTimes: times } = await blueskyService.searchPinnedReplyPage(session.handle, cursor, 50);
       if (posts.length) {
-        const existing = new Set(bookmarks.map(p => p.uri));
-        const merged = [...bookmarks, ...posts.filter(p => !existing.has(p.uri))];
-        // Merge bookmarkTimes (using ref to avoid stale closure)
-        const newTimes = { ...bookmarkTimesRef.current, ...times };
-        bookmarkTimesRef.current = newTimes;
-        // Re-sort by bookmark time desc
-        const sorted = merged.slice().sort((a, b) => {
-          const ta = new Date(newTimes[a.uri] ?? a.record.createdAt).getTime();
-          const tb = new Date(newTimes[b.uri] ?? b.record.createdAt).getTime();
-          return tb - ta;
-        });
-        setBookmarks(sorted);
-        // Append page to cache
+        // Merge into local buffer and cache
+        bookmarkTimesRef.current = { ...bookmarkTimesRef.current, ...times };
+        const setMap = new Map<string, BlueskyPost>(allCachedRef.current.map(p => [p.uri, p]));
+        for (const p of posts) setMap.set(p.uri, p);
+        allCachedRef.current = sortByBookmarkTime(Array.from(setMap.values()));
+        // Persist
         try { mergeIntoCache(session.handle, posts, times); } catch {}
+        // Append next chunk to visible list
+        appendFromLocalBuffer(CHUNK);
       }
       setCursor(next);
     } catch (e) {
@@ -118,7 +133,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [cursor, isLoadingMore, session.handle, bookmarks]);
+  }, [cursor, isLoadingMore, session.handle, appendFromLocalBuffer, sortByBookmarkTime]);
 
   useEffect(() => {
     const el = loadMoreRef.current;
@@ -128,7 +143,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
       if (first.isIntersecting) {
         loadMore();
       }
-    });
+    }, { rootMargin: '400px 0px' }); // pre-emptive load
     observer.observe(el);
     return () => observer.disconnect();
   }, [loadMore]);
@@ -144,6 +159,44 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
     authService.logout();
     onLogout();
   };
+
+  // Paste-to-pin state
+  const [pinInput, setPinInput] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState('');
+  const [hasPostWrite, setHasPostWrite] = useState(false);
+  useEffect(() => {
+    try {
+      const scopes: string[] = JSON.parse(sessionStorage.getItem('oauth_optional_scopes') || '[]');
+      const granted = sessionStorage.getItem('oauth_granted_scope') || '';
+      const s = 'app.bsky.feed.post';
+      setHasPostWrite(scopes.includes(`repo:${s}`) || granted.includes(`repo:${s}`));
+    } catch {}
+  }, []);
+
+  async function onPastePin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pinInput.trim()) return;
+    setPinError('');
+    try {
+      if (!hasPostWrite) {
+        // Reuse collections write for now? Better: add a post-write-only auth path
+        // Call a helper that requests just repo:app.bsky.feed.post
+        await authService.requestWriteForCollections(session.handle); // fallback prompt
+        return;
+      }
+      setPinBusy(true);
+      const res = await blueskyService.pinByUrl(pinInput.trim());
+      if (!res) throw new Error('Failed to post 📌 reply');
+      setPinInput('');
+      // Optionally refresh cache background (new bookmark will be included on next search page)
+      hydrateFromCacheThenRefresh();
+    } catch (e: any) {
+      setPinError(e?.message || 'Failed to bookmark');
+    } finally {
+      setPinBusy(false);
+    }
+  }
 
   return (
   <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
@@ -163,24 +216,15 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
+      <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
               <a href="/collections" className="px-3 py-2 text-sm rounded border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">Collections</a>
               <button
-                onClick={loadBookmarks}
-                disabled={isLoading}
+                onClick={hydrateFromCacheThenRefresh}
+        disabled={isLoading || isRefreshing}
         className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                 title="Refresh bookmarks"
               >
-                <RefreshCw className={`h-5 w-5 ${isLoading ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                onClick={fetchAll}
-                disabled={isFetchingAll}
-        className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                title="Fetch all"
-                aria-label="Fetch all"
-              >
-                <Diff className={`h-5 w-5 ${isFetchingAll ? 'animate-bounce' : ''}`} />
+                <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={handleLogout}
@@ -196,6 +240,22 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
 
   {/* Search and Stats */}
   <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+  {/* Paste-to-pin */}
+  <form onSubmit={onPastePin} className="mb-4 flex items-center gap-2">
+    <input
+      type="url"
+      inputMode="url"
+      value={pinInput}
+      onChange={e=>setPinInput(e.target.value)}
+      placeholder="Paste a Bluesky post URL to bookmark (📌 reply)"
+      className="flex-1 px-3 py-2 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    />
+    <button type="submit" disabled={pinBusy} className="px-3 py-2 rounded bg-blue-600 text-white disabled:opacity-50">{pinBusy?'Posting…':'Pin it'}</button>
+    {!hasPostWrite && (
+      <button type="button" onClick={async ()=>{ try { await authService.requestWriteForCollections(session.handle); } catch {} }} className="px-3 py-2 rounded bg-indigo-600 text-white">Enable post write</button>
+    )}
+  </form>
+  {pinError && <div className="-mt-3 mb-3 text-sm text-red-600 dark:text-red-400">{pinError}</div>}
   <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -219,7 +279,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
         </div>
 
         {/* Content */}
-        {isLoading ? (
+  {isLoading ? (
           <div className="text-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-300">Loading your bookmarks...</p>
@@ -229,7 +289,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
             <div className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg max-w-md mx-auto">
               <p className="text-red-600 dark:text-red-300">{error}</p>
               <button
-                onClick={loadBookmarks}
+                onClick={hydrateFromCacheThenRefresh}
                 className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
               >
                 Try Again
@@ -268,7 +328,7 @@ export function Bookmarks({ session, onLogout }: BookmarksProps) {
               ))}
             </div>
             {/* Infinite scroll sentinel (outside the grid to ensure it's reachable) */}
-            {cursor && (
+            {(cursor || cacheIndexRef.current < allCachedRef.current.length) && (
               <div ref={loadMoreRef} className="py-6 text-center text-gray-500 dark:text-gray-400">
                 {isLoadingMore ? 'Loading more…' : 'Scroll to load more'}
               </div>

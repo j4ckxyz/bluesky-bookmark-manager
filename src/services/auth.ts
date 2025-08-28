@@ -86,7 +86,7 @@ class AuthService {
             optionalScopes
           );
       
-      // Step 7: Create authorization URL using Pushed Authorization Request
+  // Step 7: Create authorization URL using Pushed Authorization Request
       const authorizationURL = await oauthClient.createAuthorizationURL(
         metadata.pushedAuthorizationRequestEndpoint,
         metadata.authorizationEndpoint,
@@ -106,6 +106,7 @@ class AuthService {
       sessionStorage.setItem('oauth_handle', normalizedHandle);
       sessionStorage.setItem('oauth_did', did);
   sessionStorage.setItem('oauth_authorization_server', authorizationServer);
+  sessionStorage.setItem('oauth_client_id', (oauthClient as any).getClientId?.() || '');
   sessionStorage.setItem('oauth_optional_scopes', JSON.stringify(optionalScopes));
   sessionStorage.setItem('user_pds', pdsEndpoint);
   sessionStorage.setItem('oauth_token_endpoint', metadata.tokenEndpoint);
@@ -218,6 +219,9 @@ class AuthService {
         sessionStorage.setItem('dpop_nonce', dpopNonce);
       }
       sessionStorage.setItem('authorization_server_issuer', authorizationServer);
+      if ((tokens as any).scope) {
+        try { sessionStorage.setItem('oauth_granted_scope', String((tokens as any).scope)); } catch {}
+      }
       
   this.clearOAuthSession();
       
@@ -294,6 +298,7 @@ class AuthService {
     sessionStorage.setItem('oauth_handle', normalizedHandle);
     sessionStorage.setItem('oauth_did', did);
     sessionStorage.setItem('oauth_authorization_server', authorizationServer);
+  sessionStorage.setItem('oauth_client_id', (oauthClient as any).getClientId?.() || '');
     sessionStorage.setItem('oauth_optional_scopes', JSON.stringify(optionalScopes));
     sessionStorage.setItem('user_pds', pdsEndpoint);
     sessionStorage.setItem('oauth_token_endpoint', metadata.tokenEndpoint);
