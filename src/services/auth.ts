@@ -47,18 +47,8 @@ class AuthService {
       // Step 4: Get authorization server metadata
     const metadata = await getATProtoAuthorizationServerMetadata(authorizationServer);
   if (import.meta.env.DEV) console.log(`[OAuth] Metadata retrieved for issuer: ${metadata.issuer}`);
-  // Default read-only scopes: Bluesky AppView RPC reads + anisota repo read
-  const appviewAud = 'did:web:api.bsky.app#bsky_appview';
-  const optionalScopes: string[] = [
-    // Bluesky AppView RPC (read-only)
-    `rpc:app.bsky.actor.getProfile?aud=${encodeURIComponent(appviewAud)}`,
-    `rpc:app.bsky.feed.getAuthorFeed?aud=${encodeURIComponent(appviewAud)}`,
-    `rpc:app.bsky.feed.getPosts?aud=${encodeURIComponent(appviewAud)}`,
-    `rpc:app.bsky.feed.searchPosts?aud=${encodeURIComponent(appviewAud)}`,
-    // Anisota collections (read-only repo)
-    'repo:net.anisota.feed.list?action=read',
-    'repo:net.anisota.feed.listItem?action=read',
-  ];
+  // Default to read-only with mandatory "atproto" only. We use public AppView for reads.
+  const optionalScopes: string[] = [];
       
       // Step 5: Generate OAuth parameters
       const state = generateOAuthNonce();
@@ -272,18 +262,8 @@ class AuthService {
       publicKey: await window.crypto.subtle.exportKey('jwk', dpopKeyPair.publicKey)
     };
     sessionStorage.setItem('pending_dpop_key_pair', JSON.stringify(pendingJwk));
-    // Prefer granular repo permissions; include existing read-only scopes + write for our NSIDs
-    const appviewAud = 'did:web:api.bsky.app#bsky_appview';
-    const readOnly = [
-      `rpc:app.bsky.actor.getProfile?aud=${encodeURIComponent(appviewAud)}`,
-      `rpc:app.bsky.feed.getAuthorFeed?aud=${encodeURIComponent(appviewAud)}`,
-      `rpc:app.bsky.feed.getPosts?aud=${encodeURIComponent(appviewAud)}`,
-      `rpc:app.bsky.feed.searchPosts?aud=${encodeURIComponent(appviewAud)}`,
-      'repo:net.anisota.feed.list?action=read',
-      'repo:net.anisota.feed.listItem?action=read',
-    ];
+    // Request only granular repo write permissions for our NSIDs
     const optionalScopes = [
-      ...readOnly,
       'repo:uk.atproto.bookmark.list',
       'repo:uk.atproto.bookmark.listItem',
     ];

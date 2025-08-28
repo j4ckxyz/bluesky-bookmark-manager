@@ -2,7 +2,7 @@
   "client_id": "https://bookmarks.atproto.uk/oauth-client-metadata.json",
   "client_name": "Bookmarks for Bluesky",
   "application_type": "web",
-  "scope": "atproto rpc:app.bsky.actor.getProfile?aud=did%3Aweb%3Aapi.bsky.app%23bsky_appview rpc:app.bsky.feed.getAuthorFeed?aud=did%3Aweb%3Aapi.bsky.app%23bsky_appview rpc:app.bsky.feed.getPosts?aud=did%3Aweb%3Aapi.bsky.app%23bsky_appview rpc:app.bsky.feed.searchPosts?aud=did%3Aweb%3Aapi.bsky.app%23bsky_appview repo:net.anisota.feed.list?action=read repo:net.anisota.feed.listItem?action=read",
+  "scope": "atproto repo:uk.atproto.bookmark.list repo:uk.atproto.bookmark.listItem",
   "redirect_uris": [
   "https://bookmarks.atproto.uk/auth/callback"
   ],
