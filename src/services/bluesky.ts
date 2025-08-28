@@ -186,13 +186,12 @@ class BlueskyService {
     }
   }
 
-  // Search-based loader: finds all replies from the user (no additional filtering),
-  // then returns the parent posts (targets) and a times map (parentUri -> reply.createdAt).
-  // Sorted by latest first.
+  // Search-based loader: finds replies from the user containing the 📌 emoji, then
+  // returns the parent posts (targets) and a bookmarkTimes map (parentUri -> reply.createdAt)
   async searchPinnedReplyPage(handle: string, cursor?: string, limit: number = 50): Promise<{ posts: BlueskyPost[]; cursor?: string; bookmarkTimes: Record<string, string>; }> {
     try {
       const url = new URL('https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts');
-  // Query: only posts from this user; we'll keep replies only below
+  // Query: only posts from this user; we'll keep only replies and order by recency
   const query = `from:${handle.replace(/^@/, '')}`;
       url.searchParams.set('q', query);
       url.searchParams.set('limit', String(Math.min(Math.max(limit, 1), 100)));
@@ -212,7 +211,7 @@ class BlueskyService {
       const seen = new Set<string>();
       for (const post of items) {
         const parentUri: string | undefined = post?.record?.reply?.parent?.uri;
-        if (!parentUri) continue; // only replies
+        if (!parentUri) continue; // only replies; no extra text filtering
         if (!seen.has(parentUri)) {
           seen.add(parentUri);
           parentUris.push(parentUri);
@@ -225,8 +224,8 @@ class BlueskyService {
         return { posts: [], cursor: nextCursor, bookmarkTimes };
       }
 
-  const posts: BlueskyPost[] = await this.getPosts(parentUris);
-  // Sort by reply time desc
+      const posts: BlueskyPost[] = await this.getPosts(parentUris);
+      // Sort by bookmark time desc
       posts.sort((a, b) => {
         const ta = new Date(bookmarkTimes[a.uri] ?? a.record.createdAt).getTime();
         const tb = new Date(bookmarkTimes[b.uri] ?? b.record.createdAt).getTime();
