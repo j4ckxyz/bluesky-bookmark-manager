@@ -1,61 +1,25 @@
 {
-  "name": "bluesky-bookmarks-webapp",
+  "name": "bluesky-bookmark-manager",
+  "version": "2.0.0",
   "private": true,
-  "version": "1.0.0",
-  "description": "A modern web application to view your Bluesky bookmarks using the 📌 emoji system",
   "type": "module",
-  "homepage": "https://bookmarks.atproto.uk",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yourname/private-repo.git"
+  "description": "Self-hosted search engine for your Bluesky bookmarks",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
   },
-  "keywords": [
-    "bluesky",
-    "bookmarks",
-    "atproto",
-    "react",
-    "typescript",
-  "oauth"
+  "workspaces": [
+    "server",
+    "web"
   ],
-  "author": "",
-  "license": "UNLICENSED",
-  "bugs": {
-    "url": "https://github.com/yourname/private-repo/issues"
-  },
   "scripts": {
-    "dev": "vite --host",
-    "start": "vite --host",
-  "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@atproto/api": "^0.16.4",
-    "@atproto/oauth-client-browser": "^0.3.30",
-    "@oslojs/binary": "^1.0.0",
-    "@oslojs/encoding": "^1.1.0",
-    "@oslojs/jwt": "^0.3.0",
-    "@pilcrowjs/object-parser": "^0.0.4",
-    "axios": "^1.11.0",
-    "lucide-react": "^0.542.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "react-router-dom": "^7.8.2"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.33.0",
-    "@types/react": "^19.1.10",
-    "@types/react-dom": "^19.1.7",
-    "@vitejs/plugin-react": "^5.0.0",
-    "autoprefixer": "^10.4.21",
-    "eslint": "^9.33.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.20",
-    "globals": "^16.3.0",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
-    "typescript": "~5.8.3",
-    "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w server",
+    "check": "npm run typecheck && npm run test"
   }
 }

@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/dist
+data
+.git
+.github
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+encryption.key
+*.log
+.DS_Store
+*.tsbuildinfo
