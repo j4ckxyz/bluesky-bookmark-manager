@@ -11,3 +11,17 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 )
+
+/*
+ * The service worker makes the app installable and lets it open offline. It is
+ * registered after load so it never competes with the first render, and only
+ * over a secure context — browsers treat localhost as secure, but a plain-HTTP
+ * LAN address is not, and registering there would throw.
+ */
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => {
+      // An unregistered worker only costs offline support; the app still runs.
+    })
+  })
+}

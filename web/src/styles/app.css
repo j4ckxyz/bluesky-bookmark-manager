@@ -1615,6 +1615,46 @@ mark {
   }
 }
 
+/* ---------- installed app (PWA) ---------- */
+
+/*
+ * Installed on iOS the web view runs full-screen under the translucent status
+ * bar, so the sticky top bar has to pad itself down past the notch. In a
+ * browser tab the inset is 0 and these rules change nothing.
+ */
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  body {
+    /* No rubber-band bounce revealing blank page behind the app. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Selecting the chrome on a long press feels like a web page, not an app. */
+  .topbar,
+  .bookmark__footer,
+  .toolbar {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* Touch polish, in a tab or installed. */
+@media (pointer: coarse) {
+  /* Removes the delay some browsers add while waiting for a double-tap. */
+  .button,
+  .topbar__tab,
+  .tag-chip,
+  .chip,
+  .select,
+  .bookmark__handle {
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+  }
+}
+
 /* Narrow phones: trim the card chrome so text keeps as much width as possible. */
 @media (max-width: 460px) {
   .bookmark {

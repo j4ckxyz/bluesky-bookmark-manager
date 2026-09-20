@@ -129,6 +129,60 @@ By default the first account to sign in claims the instance. To let other people
 use the same server, set `MULTI_USER=true`; each account gets its own private
 archive, and the server syncs all of them.
 
+#### Using more than one device
+
+Sign in again on the other device with the same handle and app password. A
+claimed single-user instance stays open to the account that claimed it, so
+phones, tablets and laptops can all hold their own session at once; sessions are
+independent, and signing out on one leaves the others alone. Sessions last
+`SESSION_TTL_DAYS` (30 by default).
+
+`MULTI_USER` is only about letting a *different* Bluesky account in. Leave it
+off for your own devices.
+
+### Installing as an app
+
+The web interface is a PWA: it installs to a home screen, opens without browser
+chrome, and starts offline.
+
+- **iPhone or iPad:** open the site in Safari, then **Share → Add to Home
+  Screen**. It launches full-screen, with the layout padded around the notch and
+  the home indicator.
+- **Android or desktop Chrome:** use the install button in the address bar.
+
+#### It needs HTTPS
+
+Service workers only run in a secure context, so **offline support and the
+Chrome install prompt need `https://`** — a plain `http://` LAN or Tailscale
+address will not do, though iOS will still add it to the home screen. `localhost`
+counts as secure, which is why it works in local development.
+
+The least painful way to get a real certificate on a home server is Tailscale,
+which issues one for your tailnet:
+
+```bash
+sudo tailscale cert "$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')"
+sudo tailscale serve --bg 8787
+```
+
+That publishes the app at `https://<machine>.<tailnet>.ts.net`. Point
+`PUBLIC_URL` at it and turn on `TRUST_PROXY`, which also switches session
+cookies to secure-only:
+
+```bash
+PUBLIC_URL=https://raspberrypi.your-tailnet.ts.net
+TRUST_PROXY=true
+```
+
+Any other TLS terminator — Caddy, nginx, Cloudflare Tunnel — works the same way.
+
+#### What works offline
+
+The app shell opens offline, so you get the interface rather than a browser
+error page. Bookmark data is not cached: it is per-account and sits behind a
+session cookie, and a stale answer would be worse than an honest one, so
+searching needs the server to be reachable.
+
 ## Searching
 
 Type words to search. Unquoted words tolerate typos and match word prefixes;

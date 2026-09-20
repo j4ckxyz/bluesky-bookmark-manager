@@ -123,6 +123,62 @@ describe('http api', () => {
     assert.equal(body.syncIntervalMinutes, 10)
   })
 
+  it('keeps several device sessions alive for the same account', async () => {
+    // Signing in on a second device must not sign the first one out: the
+    // session table is keyed per token, not per account.
+    const phone = `bskybm_session=${ctx.accounts.createAuthSession(TEST_DID, 30, 'phone')}`
+    const laptop = `bskybm_session=${ctx.accounts.createAuthSession(TEST_DID, 30, 'laptop')}`
+
+    for (const device of [phone, laptop, cookie]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/session',
+        headers: { cookie: device },
+      })
+      assert.equal(response.statusCode, 200)
+      assert.equal(response.json().account.did, TEST_DID)
+      // And each one can actually read the archive, not just identify itself.
+      const search = await app.inject({
+        method: 'GET',
+        url: '/api/v1/search',
+        headers: { cookie: device },
+      })
+      assert.equal(search.statusCode, 200)
+    }
+
+    // Signing one device out leaves the others signed in.
+    await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { cookie: phone } })
+
+    const revoked = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/session',
+      headers: { cookie: phone },
+    })
+    assert.equal(revoked.json().account, null)
+    const revokedSearch = await app.inject({
+      method: 'GET',
+      url: '/api/v1/search',
+      headers: { cookie: phone },
+    })
+    assert.equal(revokedSearch.statusCode, 401)
+
+    const survivor = await app.inject({
+      method: 'GET',
+      url: '/api/v1/search',
+      headers: { cookie: laptop },
+    })
+    assert.equal(survivor.statusCode, 200)
+  })
+
+  it('stays open to the account that claimed it, so new devices can sign in', async () => {
+    // A claimed single-user instance is closed to *new* accounts, but the
+    // sign-in screen still has to appear for the owner's other devices.
+    const response = await app.inject({ method: 'GET', url: '/api/v1/instance' })
+    const body = response.json()
+    assert.equal(body.claimed, true)
+    assert.equal(body.openToNewAccounts, false)
+  })
+
   it('reports the signed-in account', async () => {
     const response = await get('/api/v1/auth/session')
     assert.equal(response.json().account.handle, 'owner.bsky.social')

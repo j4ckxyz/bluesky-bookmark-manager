@@ -61,6 +61,14 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
       setHeaders: (reply, path) => {
         if (path.endsWith('index.html')) {
           reply.header('cache-control', 'no-cache')
+        } else if (path.endsWith('sw.js')) {
+          // A cached service worker would pin the app to an old build, so it
+          // is always revalidated and allowed to control the whole origin.
+          reply.header('cache-control', 'no-cache')
+          reply.header('service-worker-allowed', '/')
+        } else if (path.endsWith('.webmanifest')) {
+          reply.header('cache-control', 'no-cache')
+          reply.header('content-type', 'application/manifest+json; charset=utf-8')
         } else if (path.includes('/assets/')) {
           reply.header('cache-control', 'public, max-age=31536000, immutable')
         }
