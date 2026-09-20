@@ -4,28 +4,52 @@ services:
     # Or use a published image once you have pushed one:
     # image: ghcr.io/j4ckxyz/bluesky-bookmark-manager:latest
     restart: unless-stopped
+
+    # Host port is yours to pick; the container always listens on 8787.
+    # Change HOST_PORT in .env if 8787 is already taken on this machine.
     ports:
-      - '8787:8787'
+      - '${HOST_PORT:-8787}:8787'
+
     volumes:
       - bookmarks-data:/data
+
+    # Every value below is read from .env (copy .env.example to .env).
+    # Blank means "use the server's own default", so defaults live in exactly
+    # one place — server/src/config.ts — and cannot drift out of sync here.
     environment:
+      # Tells the app its own address. Defaults to the host port you chose.
+      # Set this to your real URL when behind a reverse proxy; an https:// value
+      # also switches session cookies to secure-only.
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${HOST_PORT:-8787}}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      SECURE_COOKIES: ${SECURE_COOKIES:-}
+
       # Generate one with: openssl rand -base64 32
       # Leave unset and the server creates and stores its own in /data.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
 
-      # Set this to your public address when running behind a reverse proxy;
-      # it switches session cookies to secure-only.
-      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8787}
-      TRUST_PROXY: ${TRUST_PROXY:-false}
-
       # Single-user by default: the first account to sign in claims the
       # instance. Set MULTI_USER=true to let others sign in too.
-      MULTI_USER: ${MULTI_USER:-false}
+      MULTI_USER: ${MULTI_USER:-}
       ALLOWED_HANDLES: ${ALLOWED_HANDLES:-}
+      SESSION_TTL_DAYS: ${SESSION_TTL_DAYS:-}
 
-      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-10}
-      FULL_SYNC_EVERY: ${FULL_SYNC_EVERY:-6}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Syncing.
+      SYNC_ENABLED: ${SYNC_ENABLED:-}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-}
+      FULL_SYNC_EVERY: ${FULL_SYNC_EVERY:-}
+      SYNC_PAGE_SIZE: ${SYNC_PAGE_SIZE:-}
+      SYNC_PAGE_DELAY_MS: ${SYNC_PAGE_DELAY_MS:-}
+      QUICK_SYNC_STABLE_PAGES: ${QUICK_SYNC_STABLE_PAGES:-}
+      SYNC_ON_LOGIN: ${SYNC_ON_LOGIN:-}
+      PURGE_REMOVED_AFTER_DAYS: ${PURGE_REMOVED_AFTER_DAYS:-}
+
+      # Upstream services.
+      APPVIEW_URL: ${APPVIEW_URL:-}
+      PLC_DIRECTORY_URL: ${PLC_DIRECTORY_URL:-}
+      DEFAULT_PDS_URL: ${DEFAULT_PDS_URL:-}
+
+      LOG_LEVEL: ${LOG_LEVEL:-}
 
 volumes:
   bookmarks-data:

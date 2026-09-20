@@ -44,10 +44,36 @@ and the `app.bsky.bookmark.*` lexicons.
 ```bash
 git clone https://github.com/j4ckxyz/bluesky-bookmark-manager.git
 cd bluesky-bookmark-manager
+cp .env.example .env    # optional — edit to change the port and other settings
 docker compose up -d
 ```
 
 Open <http://localhost:8787>.
+
+#### Changing the port
+
+If port 8787 is already in use on the host (`failed to bind host port
+0.0.0.0:8787/tcp: address already in use`), set `HOST_PORT` in `.env`:
+
+```bash
+echo 'HOST_PORT=8080' >> .env
+docker compose up -d
+```
+
+Then open <http://localhost:8080>. The server keeps listening on 8787 *inside*
+the container; only the host side moves, and `PUBLIC_URL` follows `HOST_PORT`
+automatically unless you set it yourself.
+
+Note `PORT` in `.env` is for running from source (`npm start`) and is ignored
+under Docker — use `HOST_PORT` there.
+
+#### Other settings
+
+Anything in `.env.example` can go in `.env`: `MULTI_USER`, `ALLOWED_HANDLES`,
+`SYNC_INTERVAL_MINUTES`, `ENCRYPTION_KEY`, `LOG_LEVEL` and the rest. Values you
+leave out or leave blank fall back to the server's own defaults. Apply changes
+with `docker compose up -d` — no rebuild needed, since these are read at
+container start.
 
 ### From source
 
