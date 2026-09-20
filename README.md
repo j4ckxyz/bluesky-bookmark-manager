@@ -75,6 +75,32 @@ leave out or leave blank fall back to the server's own defaults. Apply changes
 with `docker compose up -d` — no rebuild needed, since these are read at
 container start.
 
+#### Updating
+
+```bash
+cd ~/bluesky-bookmark-manager
+./update.sh
+```
+
+That pulls the latest commit, rebuilds the image, restarts the container and
+waits until `/api/v1/health` answers, printing the logs instead if it does not
+come up. Your database, sign-in and `.env` are all kept: the data lives in the
+`bookmarks-data` volume, which is never touched.
+
+The script refuses to run with uncommitted changes rather than risk clobbering
+them. Options:
+
+| Flag | Effect |
+| --- | --- |
+| `--prune` | Also delete dangling images afterwards. Worth using on a Raspberry Pi, where rebuild layers add up. |
+| `--no-pull` | Rebuild and restart what is already checked out, without pulling. |
+
+The equivalent by hand is `git pull && docker compose up -d --build`.
+
+Schema changes are applied automatically on start: each migration runs once, in
+order, and restarting an already-migrated database does nothing. There is no
+separate migration step to remember.
+
 ### From source
 
 Requires Node 22.12 or newer.
