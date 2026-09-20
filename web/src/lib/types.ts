@@ -61,6 +61,7 @@ export type Bookmark = {
   externalUri: string | null
   externalTitle: string | null
   externalDescription: string | null
+  externalThumb: string | null
 
   mentions: BookmarkMention[]
   mentionCount: number

@@ -48,6 +48,7 @@ export type BookmarkRow = {
   external_uri: string | null
   external_title: string | null
   external_description: string | null
+  external_thumb: string | null
   primary_domain: string | null
   mention_count: number
   tag_count: number
@@ -146,6 +147,7 @@ export class BookmarkStore {
         external_uri: meta.externalUri,
         external_title: meta.externalTitle,
         external_description: meta.externalDescription,
+        external_thumb: meta.externalThumb,
         primary_domain: meta.primaryDomain,
         mention_count: meta.mentionCount,
         tag_count: meta.tagCount,
@@ -187,6 +189,7 @@ export class BookmarkStore {
                has_video = @has_video, has_media = @has_media,
                has_external = @has_external, external_uri = @external_uri,
                external_title = @external_title, external_description = @external_description,
+               external_thumb = @external_thumb,
                primary_domain = @primary_domain,
                mention_count = @mention_count, tag_count = @tag_count,
                langs = @langs, labels = @labels, has_labels = @has_labels,
@@ -207,7 +210,7 @@ export class BookmarkStore {
                is_reply, is_root, is_self_reply, reply_root_uri, reply_parent_uri, reply_parent_did,
                is_quote, quoted_uri, quoted_author_handle, quoted_text,
                has_links, link_count, has_images, image_count, has_alt_text, has_video, has_media,
-               has_external, external_uri, external_title, external_description, primary_domain,
+               has_external, external_uri, external_title, external_description, external_thumb, primary_domain,
                mention_count, tag_count, langs, labels, has_labels,
                word_count, char_count, alt_text,
                like_count, repost_count, reply_count, quote_count, bookmark_count, raw
@@ -218,7 +221,7 @@ export class BookmarkStore {
                @is_reply, @is_root, @is_self_reply, @reply_root_uri, @reply_parent_uri, @reply_parent_did,
                @is_quote, @quoted_uri, @quoted_author_handle, @quoted_text,
                @has_links, @link_count, @has_images, @image_count, @has_alt_text, @has_video, @has_media,
-               @has_external, @external_uri, @external_title, @external_description, @primary_domain,
+               @has_external, @external_uri, @external_title, @external_description, @external_thumb, @primary_domain,
                @mention_count, @tag_count, @langs, @labels, @has_labels,
                @word_count, @char_count, @alt_text,
                @like_count, @repost_count, @reply_count, @quote_count, @bookmark_count, @raw
@@ -411,6 +414,7 @@ export class BookmarkStore {
       externalUri: row.external_uri,
       externalTitle: row.external_title,
       externalDescription: row.external_description,
+      externalThumb: row.external_thumb,
 
       mentions: mentions.map((m) => ({
         ...(m.did ? { did: m.did } : {}),

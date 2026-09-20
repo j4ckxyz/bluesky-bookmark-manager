@@ -16,6 +16,20 @@ import { SyncRunStore } from '../sync/runs.ts'
 
 const DEMO_DID = 'did:plc:demoaccount00000000000'
 
+/**
+ * A stand-in Open Graph image. Inlined as a data URI so `seed:demo` shows real
+ * link cards without reaching the network for a placeholder.
+ */
+function demoThumb(label: string, hue: number): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="764" height="400">` +
+    `<rect width="764" height="400" fill="hsl(${hue} 55% 42%)"/>` +
+    `<text x="50%" y="52%" text-anchor="middle" fill="white"` +
+    ` font-family="system-ui, sans-serif" font-size="38">${label}</text>` +
+    `</svg>`
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
 const AUTHORS = [
   { did: 'did:plc:author01', handle: 'why.bsky.team', name: 'Paul Frazee', verified: true },
   { did: 'did:plc:author02', handle: 'atproto.com', name: 'AT Protocol', verified: true },
@@ -34,7 +48,7 @@ const POSTS: Array<{
   video?: boolean
   reply?: boolean
   quote?: { handle: string; text: string }
-  external?: { uri: string; title: string; description: string }
+  external?: { uri: string; title: string; description: string; thumb?: string }
   langs?: string[]
   likes?: number
   reposts?: number
@@ -55,6 +69,7 @@ const POSTS: Array<{
       uri: 'https://docs.bsky.app/docs/advanced-guides/firehose',
       title: 'Consuming the firehose',
       description: 'A practical guide to the network event stream, including backfill strategy.',
+      thumb: demoThumb('docs.bsky.app', 212),
     },
     tags: ['atproto', 'firehose'],
     likes: 1450,
@@ -170,6 +185,7 @@ const POSTS: Array<{
       uri: 'https://www.theguardian.com/technology',
       title: 'When the social graph becomes infrastructure',
       description: 'What portability changes about the economics of running a social network.',
+      thumb: demoThumb('theguardian.com', 24),
     },
     likes: 870,
     daysAgo: 182,

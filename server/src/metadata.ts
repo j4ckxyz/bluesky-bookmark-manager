@@ -104,7 +104,7 @@ type MediaCounts = {
   images: number
   altTexts: string[]
   video: boolean
-  external: { uri: string; title: string | null; description: string | null } | null
+  external: { uri: string; title: string | null; description: string | null; thumb: string | null } | null
   quoted: { uri: string; handle: string | null; text: string | null } | null
 }
 
@@ -148,6 +148,10 @@ function readEmbed(embed: unknown, out: MediaCounts): void {
           uri,
           title: asString(external['title']),
           description: asString(external['description']),
+          // In an embed *view* the thumb is already a CDN URL. Raw records
+          // carry a blob instead, which we cannot turn into a URL here, so
+          // anything that is not a string is simply left out.
+          thumb: asString(external['thumb']),
         }
       }
     }
@@ -235,6 +239,7 @@ const EMPTY: Omit<BookmarkMetadata, 'uri' | 'cid' | 'rkey' | 'bookmarkedAt' | 'i
   externalUri: null,
   externalTitle: null,
   externalDescription: null,
+  externalThumb: null,
   mentions: [],
   mentionCount: 0,
   tags: [],
@@ -403,6 +408,7 @@ export function extractFromPostView(post: Unknown): BookmarkMetadata {
     externalUri: media.external?.uri ?? null,
     externalTitle: media.external?.title ?? null,
     externalDescription: media.external?.description ?? null,
+    externalThumb: media.external?.thumb ?? null,
 
     mentions: mentionList,
     mentionCount: mentionList.length,

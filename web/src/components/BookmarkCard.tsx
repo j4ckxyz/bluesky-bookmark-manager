@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   BadgeCheck,
   BookmarkX,
@@ -32,6 +33,58 @@ function Highlighted({ text, terms }: { text: string; terms: string[] }) {
         run.match ? <mark key={index}>{run.text}</mark> : <span key={index}>{run.text}</span>,
       )}
     </>
+  )
+}
+
+/**
+ * An external link. When the post carried an Open Graph image we show the full
+ * card; otherwise it falls back to the compact title-and-domain row. A thumb
+ * that fails to load (link rot, a blocked CDN) drops back to the compact form
+ * rather than leaving a broken image behind.
+ */
+function LinkCard({
+  url,
+  domain,
+  title,
+  description,
+  thumb,
+}: {
+  url: string
+  domain: string | null
+  title: string
+  description: string | null
+  thumb: string | null
+}) {
+  const [thumbFailed, setThumbFailed] = useState(false)
+  const showThumb = Boolean(thumb) && !thumbFailed
+
+  return (
+    <a
+      className={`bookmark__link${showThumb ? ' bookmark__link--rich' : ''}`}
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+    >
+      {showThumb ? (
+        <img
+          className="bookmark__link-thumb"
+          src={thumb ?? undefined}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setThumbFailed(true)}
+        />
+      ) : (
+        <Link2 size={15} style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
+      )}
+      <span className="bookmark__link-body">
+        <span className="bookmark__link-title">{title}</span>
+        {showThumb && description && (
+          <span className="bookmark__link-desc">{description}</span>
+        )}
+        <span className="bookmark__link-domain">{domain}</span>
+      </span>
+    </a>
   )
 }
 
@@ -117,20 +170,13 @@ export function BookmarkCard({ bookmark, terms, onFilter }: Props) {
       )}
 
       {externalLink && (
-        <a
-          className="bookmark__link"
-          href={externalLink.url}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          <Link2 size={15} style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
-          <span className="bookmark__link-body">
-            <span className="bookmark__link-title">
-              {bookmark.externalTitle || externalLink.title || prettyUrl(externalLink.url)}
-            </span>
-            <span className="bookmark__link-domain">{externalLink.domain}</span>
-          </span>
-        </a>
+        <LinkCard
+          url={externalLink.url}
+          domain={externalLink.domain}
+          title={bookmark.externalTitle || externalLink.title || prettyUrl(externalLink.url)}
+          description={bookmark.externalDescription}
+          thumb={bookmark.externalThumb}
+        />
       )}
 
       {bookmark.altText && (

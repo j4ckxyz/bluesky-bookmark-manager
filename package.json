@@ -21,5 +21,11 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w server",
     "check": "npm run typecheck && npm run test"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
+    "core-js@3.50.0": true
   }
 }

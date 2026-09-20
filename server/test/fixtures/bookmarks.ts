@@ -23,7 +23,7 @@ export type PostOptions = {
   mentions?: Array<{ did: string; handle: string }>
   images?: Array<{ alt: string }>
   video?: boolean
-  external?: { uri: string; title: string; description: string }
+  external?: { uri: string; title: string; description: string; thumb?: string }
   quote?: { uri: string; handle: string; text: string }
   replyTo?: { parentUri: string; rootUri: string }
   likeCount?: number

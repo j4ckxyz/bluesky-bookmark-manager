@@ -62,6 +62,7 @@ export type BookmarkMetadata = {
   externalUri: string | null
   externalTitle: string | null
   externalDescription: string | null
+  externalThumb: string | null
 
   mentions: BookmarkMention[]
   mentionCount: number

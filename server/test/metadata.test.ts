@@ -136,6 +136,38 @@ describe('metadata extraction', () => {
     assert.equal(meta.primaryDomain, 'docs.bsky.app')
     assert.equal(meta.links[0]?.source, 'embed')
     assert.equal(meta.links[0]?.title, 'A guide')
+    // No thumb on the embed means no thumb on the row.
+    assert.equal(meta.externalThumb, null)
+  })
+
+  it('reads the Open Graph thumbnail off an external card', () => {
+    const meta = extract({
+      external: {
+        uri: 'https://docs.bsky.app/guide',
+        title: 'A guide',
+        description: 'How things work',
+        thumb: 'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafy@jpeg',
+      },
+    })
+    assert.equal(
+      meta.externalThumb,
+      'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafy@jpeg',
+    )
+  })
+
+  it('ignores a thumb that is a raw blob rather than a resolved URL', () => {
+    // Post *records* carry a blob here, which we cannot turn into a URL
+    // without a CDN round trip; only hydrated views give us a string.
+    const meta = extract({
+      external: {
+        uri: 'https://docs.bsky.app/guide',
+        title: 'A guide',
+        description: 'How things work',
+        thumb: { $type: 'blob', ref: { $link: 'bafy' } } as unknown as string,
+      },
+    })
+    assert.equal(meta.externalThumb, null)
+    assert.equal(meta.externalTitle, 'A guide')
   })
 
   it('reads quote posts', () => {

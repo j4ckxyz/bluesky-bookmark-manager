@@ -192,4 +192,13 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Thumbnail for an external link card, so posts can show the Open Graph
+    // image rather than a bare title. Existing rows stay NULL until a full
+    // sync re-reads them from the AppView.
+    name: '002_external_thumb',
+    sql: /* sql */ `
+      ALTER TABLE bookmarks ADD COLUMN external_thumb TEXT;
+    `,
+  },
 ]
