@@ -938,28 +938,34 @@ mark {
 /* ---------- rich (Open Graph) link card ---------- */
 
 /*
- * With a thumbnail the card becomes a vertical stack: image on top, then the
- * text block. Overriding the flex direction here keeps the compact variant
- * above untouched.
+ * The thumbnail sits beside the text rather than above it. A full-width
+ * Open Graph image is around 470px tall in this column, which lets a single
+ * bookmark fill the screen; a fixed-width thumb keeps the feed scannable.
  */
 .bookmark__link--rich {
-  display: block;
+  align-items: stretch;
+  gap: 0;
   padding: 0;
   overflow: hidden;
 }
 
 .bookmark__link-thumb {
   display: block;
-  width: 100%;
-  aspect-ratio: 1.91 / 1; /* the Open Graph ratio, so cards do not jump on load */
+  flex: 0 0 auto;
+  width: 132px;
+  /* Stretches to whatever the text block needs, with a floor so a card with
+     no description does not end up with a sliver of an image. */
+  align-self: stretch;
+  min-height: 92px;
   object-fit: cover;
   background: var(--surface-sunken);
-  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
 }
 
 .bookmark__link--rich .bookmark__link-body {
   padding: var(--space-3);
   gap: 2px;
+  justify-content: center;
 }
 
 /* With room to breathe, let the title wrap to two lines instead of clipping. */
@@ -1631,5 +1637,10 @@ mark {
 
   .searchbar__hint {
     display: none;
+  }
+
+  .bookmark__link-thumb {
+    width: 96px;
+    min-height: 80px;
   }
 }
