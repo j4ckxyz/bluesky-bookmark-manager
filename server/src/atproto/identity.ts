@@ -1,6 +1,7 @@
 import { Client } from '@atproto/lex-client'
 import { app, com } from '@bsky/sdk/lexicons'
 import type { Config } from '../config.ts'
+import { fetchPublicJson, HttpStatusError, timedFetch, UnsafeRequestError } from '../lib/http.ts'
 
 export type ResolvedIdentity = {
   did: string
@@ -47,7 +48,7 @@ export class IdentityResolver {
 
   constructor(config: Config) {
     this.#config = config
-    this.#appview = new Client(config.appviewUrl)
+    this.#appview = new Client({ service: config.appviewUrl, fetch: timedFetch })
   }
 
   /** Suggests accounts as someone types their handle on the sign-in screen. */
@@ -77,6 +78,9 @@ export class IdentityResolver {
     const cleaned = identifier.trim().replace(/^@/, '').toLowerCase()
     if (cleaned.length === 0) throw new IdentityError('Enter a handle or DID')
 
+    if (cleaned.startsWith('did:') && !isDid(cleaned)) {
+      throw new IdentityError(`"${cleaned}" is not a valid DID`)
+    }
     const did = cleaned.startsWith('did:') ? cleaned : await this.#resolveHandle(cleaned)
     const doc = await this.#fetchDidDocument(did)
 
@@ -87,7 +91,7 @@ export class IdentityResolver {
       )
     }
 
-    const profile = await this.#tryProfile(did)
+    const profile = await this.profile(did)
 
     return {
       did,
@@ -100,7 +104,7 @@ export class IdentityResolver {
   }
 
   /** Best-effort profile hydration; identity resolution must not depend on it. */
-  async #tryProfile(
+  async profile(
     actor: string,
   ): Promise<{ handle: string; displayName: string | null; avatar: string | null } | null> {
     if (!isAtIdentifier(actor)) return null
@@ -134,11 +138,29 @@ export class IdentityResolver {
     const url = didDocumentUrl(did, this.#config.plcDirectoryUrl)
     if (!url) throw new IdentityError(`Unsupported DID method: ${did}`)
 
-    const response = await fetch(url, { headers: { accept: 'application/json' } })
-    if (!response.ok) {
-      throw new IdentityError(`Could not look up ${did} (${response.status})`)
+    let doc: unknown
+    if (did.startsWith('did:web:')) {
+      // The host is chosen by whoever is signing in, so it gets the locked-down fetch.
+      try {
+        doc = await fetchPublicJson(url)
+      } catch (err) {
+        if (err instanceof HttpStatusError) {
+          throw new IdentityError(`Could not look up ${did} (${err.status})`)
+        }
+        if (err instanceof UnsafeRequestError) {
+          throw new IdentityError(`Could not look up ${did}: ${err.message}`)
+        }
+        // DNS failures, refused connections and TLS errors all mean the same
+        // thing to someone signing in: that did:web host is not usable.
+        throw new IdentityError(`Could not look up ${did}`)
+      }
+    } else {
+      const response = await timedFetch(url, { headers: { accept: 'application/json' } })
+      if (!response.ok) {
+        throw new IdentityError(`Could not look up ${did} (${response.status})`)
+      }
+      doc = await response.json()
     }
-    const doc: unknown = await response.json()
     if (typeof doc !== 'object' || doc === null) {
       throw new IdentityError(`Malformed DID document for ${did}`)
     }
@@ -163,6 +185,9 @@ export function isAtIdentifier(value: string): value is `${string}.${string}` | 
   return isDid(value) || isHandle(value)
 }
 
+const DID_WEB_HOST = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?(:\d{1,5})?$/
+const DID_WEB_PATH_SEGMENT = /^[a-zA-Z0-9._-]+$/
+
 /** Where a DID document lives, per DID method. */
 export function didDocumentUrl(did: string, plcDirectoryUrl: string): string | null {
   if (did.startsWith('did:plc:')) {
@@ -172,9 +197,22 @@ export function didDocumentUrl(did: string, plcDirectoryUrl: string): string | n
     const rest = did.slice('did:web:'.length)
     const [host, ...path] = rest.split(':')
     if (!host) return null
-    const decodedHost = decodeURIComponent(host)
-    return path.length > 0
-      ? `https://${decodedHost}/${path.map(decodeURIComponent).join('/')}/did.json`
+    let decodedHost: string
+    let segments: string[]
+    try {
+      decodedHost = decodeURIComponent(host).toLowerCase()
+      segments = path.map(decodeURIComponent)
+    } catch {
+      return null
+    }
+    // A domain name with an optional port. IP literals, userinfo and bare
+    // names like "localhost" are rejected before anything is fetched.
+    if (!DID_WEB_HOST.test(decodedHost)) return null
+    if (segments.some((segment) => !DID_WEB_PATH_SEGMENT.test(segment) || /^\.+$/.test(segment))) {
+      return null
+    }
+    return segments.length > 0
+      ? `https://${decodedHost}/${segments.join('/')}/did.json`
       : `https://${decodedHost}/.well-known/did.json`
   }
   return null

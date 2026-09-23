@@ -101,6 +101,26 @@ Schema changes are applied automatically on start: each migration runs once, in
 order, and restarting an already-migrated database does nothing. There is no
 separate migration step to remember.
 
+#### Backups
+
+The whole archive is one SQLite file in the `bookmarks-data` volume. Take a
+consistent copy while the server is running with:
+
+```bash
+docker compose exec bookmarks node server/dist/backup.js
+```
+
+That writes `/data/backups/bookmarks-<timestamp>.db` inside the volume and
+prints the path; pass a path to write somewhere else. Copy it off the machine
+with `docker compose cp bookmarks:/data/backups ./backups`. From source, run
+`npm run backup -w server`.
+
+Do not just `cp` the live `bookmarks.db`: the database runs in WAL mode, so
+recent writes can still be sitting in `bookmarks.db-wal`. To restore, stop the
+container, put the backup in place as `/data/bookmarks.db` and start it again.
+If you let the server generate its own key, back up `/data/encryption.key` too,
+or you will need to sign in again after restoring.
+
 ### From source
 
 Requires Node 22.12 or newer.
@@ -337,7 +357,12 @@ millisecond.
   `APPVIEW_URL` elsewhere, or leave the handle field alone, if you would rather
   it were not.
 - The web interface is served same-origin, so there is no CORS surface, and
-  cookies are `HttpOnly` and `SameSite=Lax`.
+  cookies are `HttpOnly` and `SameSite=Lax`. Requests that change anything and
+  rely on the cookie are also refused unless the browser says they came from
+  this site.
+- Sign-in and handle lookups are rate limited per IP address, every outbound
+  request has a timeout, and `did:web` identities are only ever fetched over
+  https from public addresses.
 - Use an app password, never your main one, and revoke it in Bluesky's settings
   if you stop using this.
 

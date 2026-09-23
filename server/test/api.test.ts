@@ -342,6 +342,58 @@ describe('http api', () => {
     assert.equal(response.json().error, 'invalid_credentials')
   })
 
+  it('refuses to resolve a did:web that points at a private host', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/identity/resolve?handle=did:web:169.254.169.254',
+    })
+    assert.equal(response.statusCode, 404)
+    assert.equal(response.json().error, 'not_found')
+  })
+
+  it('refuses cookie-authenticated writes from another site', async () => {
+    const crossSite = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sync/cancel',
+      headers: { cookie, 'sec-fetch-site': 'cross-site' },
+    })
+    assert.equal(crossSite.statusCode, 403)
+
+    const foreignOrigin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sync/cancel',
+      headers: { cookie, origin: 'https://evil.example' },
+    })
+    assert.equal(foreignOrigin.statusCode, 403)
+
+    // Same-origin browser requests and cross-site reads are unaffected.
+    const sameOrigin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/sync/cancel',
+      headers: { cookie, 'sec-fetch-site': 'same-origin' },
+    })
+    assert.notEqual(sameOrigin.statusCode, 403)
+    const read = await get('/api/v1/search', { 'sec-fetch-site': 'cross-site' })
+    assert.equal(read.statusCode, 200)
+  })
+
+  it('rate limits sign-in attempts per address', async () => {
+    const built = buildApp()
+    const scoped = await createApp(built.ctx)
+    const attempt = () =>
+      scoped.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: { identifier: '', password: '' },
+      })
+    for (let i = 0; i < 10; i++) {
+      assert.equal((await attempt()).statusCode, 401)
+    }
+    assert.equal((await attempt()).statusCode, 429)
+    await scoped.close()
+    built.ctx.close()
+  })
+
   it('clears the session cookie on logout', async () => {
     const built = buildApp()
     const scoped = await createApp(built.ctx)

@@ -12,6 +12,7 @@ import {
   providerLabelFor,
 } from '../src/atproto/identity.ts'
 import { decryptJson, encryptJson, generateToken, hashToken, safeEqual } from '../src/lib/crypto.ts'
+import { fetchPublicJson, isPublicAddress, UnsafeRequestError } from '../src/lib/http.ts'
 import { allowedEdits, damerauLevenshtein, trigramSimilarity } from '../src/lib/fuzzy.ts'
 
 describe('crypto', () => {
@@ -121,6 +122,22 @@ describe('identity helpers', () => {
     assert.equal(didDocumentUrl('did:web:example.com:users:alice', 'x'), 'https://example.com/users/alice/did.json')
   })
 
+  it('refuses did:web hosts that are not public domain names', () => {
+    for (const did of [
+      'did:web:localhost',
+      'did:web:127.0.0.1',
+      'did:web:169.254.169.254',
+      'did:web:%5B%3A%3A1%5D',
+      'did:web:user%40internal.example',
+      'did:web:example.com%2Fadmin',
+      'did:web:example.com:..:secret',
+      'did:web:%E0%A4%A',
+    ]) {
+      assert.equal(didDocumentUrl(did, 'x'), null, did)
+    }
+    assert.equal(didDocumentUrl('did:web:example.com%3A8443', 'x'), 'https://example.com:8443/.well-known/did.json')
+  })
+
   it('returns null for an unsupported DID method', () => {
     assert.equal(didDocumentUrl('did:key:z6Mk', 'x'), null)
   })
@@ -190,5 +207,38 @@ describe('identity helpers', () => {
     assert.throws(() => normaliseServiceUrl('http://pds.example.com'), IdentityError)
     assert.throws(() => normaliseServiceUrl(''), IdentityError)
     assert.throws(() => normaliseServiceUrl('   '), IdentityError)
+  })
+})
+
+describe('outbound http', () => {
+  it('treats private, loopback and link-local addresses as non-public', () => {
+    for (const address of [
+      '10.1.2.3',
+      '127.0.0.1',
+      '169.254.169.254',
+      '172.20.0.1',
+      '192.168.1.1',
+      '100.64.0.1',
+      '0.0.0.0',
+      '::1',
+      'fd00::1',
+      'fe80::1',
+      '::ffff:10.0.0.1',
+      'not-an-ip',
+    ]) {
+      assert.equal(isPublicAddress(address), false, address)
+    }
+    for (const address of ['1.1.1.1', '8.8.8.8', '2606:4700:4700::1111']) {
+      assert.equal(isPublicAddress(address), true, address)
+    }
+  })
+
+  it('refuses to fetch from a host that resolves to a private address', async () => {
+    await assert.rejects(fetchPublicJson('https://localhost/.well-known/did.json'), UnsafeRequestError)
+  })
+
+  it('refuses IP literals and plain http', async () => {
+    await assert.rejects(fetchPublicJson('https://127.0.0.1/did.json'), UnsafeRequestError)
+    await assert.rejects(fetchPublicJson('http://example.com/did.json'), UnsafeRequestError)
   })
 })

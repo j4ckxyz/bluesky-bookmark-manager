@@ -11,6 +11,15 @@ type LoginBody = {
   authFactorToken?: unknown
 }
 
+/**
+ * Per-IP limits for the routes anyone can hit without signing in. Login is
+ * tight because each attempt is forwarded to someone's PDS; typeahead fires
+ * on keystrokes, so it gets more room.
+ */
+const LOGIN_LIMIT = { rateLimit: { max: 10, timeWindow: '5 minutes' } }
+const RESOLVE_LIMIT = { rateLimit: { max: 30, timeWindow: '1 minute' } }
+const TYPEAHEAD_LIMIT = { rateLimit: { max: 120, timeWindow: '1 minute' } }
+
 const asText = (value: unknown): string => (typeof value === 'string' ? value.trim() : '')
 
 export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -36,53 +45,57 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
     }
   })
 
-  app.post<{ Body: LoginBody }>('/api/v1/auth/login', async (request, reply) => {
-    const body = request.body ?? {}
-    const identifier = asText(body.identifier)
-    const password = asText(body.password)
-    const service = asText(body.service)
-    const authFactorToken = asText(body.authFactorToken)
+  app.post<{ Body: LoginBody }>(
+    '/api/v1/auth/login',
+    { config: LOGIN_LIMIT },
+    async (request, reply) => {
+      const body = request.body ?? {}
+      const identifier = asText(body.identifier)
+      const password = asText(body.password)
+      const service = asText(body.service)
+      const authFactorToken = asText(body.authFactorToken)
 
-    try {
-      const result = await ctx.sessions.login({
-        identifier,
-        password,
-        service: service || undefined,
-        authFactorToken: authFactorToken || undefined,
-      })
+      try {
+        const result = await ctx.sessions.login({
+          identifier,
+          password,
+          service: service || undefined,
+          authFactorToken: authFactorToken || undefined,
+        })
 
-      const token = ctx.accounts.createAuthSession(
-        result.did,
-        ctx.config.sessionTtlDays,
-        request.headers['user-agent'] ?? null,
-      )
-      setSessionCookie(reply, token, ctx)
+        const token = ctx.accounts.createAuthSession(
+          result.did,
+          ctx.config.sessionTtlDays,
+          request.headers['user-agent'] ?? null,
+        )
+        setSessionCookie(reply, token, ctx)
 
-      // Kick off the first walk immediately; the UI follows it over SSE.
-      if (ctx.config.syncOnLogin) {
-        const mode = ctx.engine.nextScheduledMode(result.did)
-        void ctx.engine
-          .run(result.did, { mode, trigger: 'login' })
-          .catch((err: unknown) => request.log.error({ err }, 'login sync failed'))
-      }
+        // Kick off the first walk immediately; the UI follows it over SSE.
+        if (ctx.config.syncOnLogin) {
+          const mode = ctx.engine.nextScheduledMode(result.did)
+          void ctx.engine
+            .run(result.did, { mode, trigger: 'login' })
+            .catch((err: unknown) => request.log.error({ err }, 'login sync failed'))
+        }
 
-      return {
-        account: ctx.accounts.get(result.did),
-        providerLabel: result.providerLabel,
-        sync: ctx.engine.status(result.did),
+        return {
+          account: ctx.accounts.get(result.did),
+          providerLabel: result.providerLabel,
+          sync: ctx.engine.status(result.did),
+        }
+      } catch (err) {
+        if (err instanceof AuthError) {
+          const status = err.code === 'not_allowed' ? 403 : err.code === 'unavailable' ? 502 : 401
+          return reply.code(status).send({ error: err.code, message: err.message })
+        }
+        if (err instanceof IdentityError) {
+          return reply.code(400).send({ error: 'identity', message: err.message })
+        }
+        request.log.error({ err }, 'login failed')
+        return reply.code(500).send({ error: 'internal', message: 'Something went wrong signing in.' })
       }
-    } catch (err) {
-      if (err instanceof AuthError) {
-        const status = err.code === 'not_allowed' ? 403 : err.code === 'unavailable' ? 502 : 401
-        return reply.code(status).send({ error: err.code, message: err.message })
-      }
-      if (err instanceof IdentityError) {
-        return reply.code(400).send({ error: 'identity', message: err.message })
-      }
-      request.log.error({ err }, 'login failed')
-      return reply.code(500).send({ error: 'internal', message: 'Something went wrong signing in.' })
-    }
-  })
+    },
+  )
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
     const cookie = request.cookies[SESSION_COOKIE]
@@ -107,6 +120,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   app.get<{ Querystring: { q?: string; limit?: string } }>(
     '/api/v1/identity/typeahead',
+    { config: TYPEAHEAD_LIMIT },
     async (request, reply) => {
       const q = asText(request.query.q)
       if (q.length === 0) return { actors: [] }
@@ -125,6 +139,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
   /** Resolves a handle to its hosting provider, for the sign-in screen. */
   app.get<{ Querystring: { handle?: string } }>(
     '/api/v1/identity/resolve',
+    { config: RESOLVE_LIMIT },
     async (request, reply) => {
       const handle = asText(request.query.handle)
       if (!handle) {

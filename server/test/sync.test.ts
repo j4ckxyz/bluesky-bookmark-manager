@@ -205,6 +205,31 @@ describe('sync engine', () => {
     assert.equal(runs.latest(TEST_DID)?.status, 'failed')
   })
 
+  it('stops, without removing anything, when the PDS repeats a cursor', async () => {
+    const { engine, bookmarks } = createHarness()
+    await engine.run(TEST_DID, {
+      mode: 'backfill',
+      trigger: 'login',
+      fetcher: pagedFetcher([bookmarkView({ uri: 'at://did:plc:a/app.bsky.feed.post/kept' })]),
+    })
+
+    let calls = 0
+    const result = await engine.run(TEST_DID, {
+      mode: 'full',
+      trigger: 'manual',
+      fetcher: async () => {
+        calls++
+        return { bookmarks: [bookmarkView({ uri: 'at://did:plc:a/app.bsky.feed.post/loop' })], cursor: 'same' }
+      },
+    })
+
+    assert.equal(result.status, 'failed')
+    assert.match(result.error ?? '', /same page twice/)
+    assert.equal(calls, 2)
+    assert.equal(result.removed, 0)
+    assert.equal(bookmarks.countActive(TEST_DID), 2)
+  })
+
   it('joins a concurrent run rather than walking the listing twice', async () => {
     const { engine } = createHarness()
     const fetcher = pagedFetcher(

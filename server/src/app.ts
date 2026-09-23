@@ -1,4 +1,5 @@
 import cookie from '@fastify/cookie'
+import rateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
@@ -19,6 +20,9 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
   })
 
   await app.register(cookie)
+  // Opt-in per route: only the unauthenticated endpoints that reach out to
+  // other servers are limited, so normal browsing is never throttled.
+  await app.register(rateLimit, { global: false })
 
   registerAuth(app, ctx)
   registerAuthRoutes(app, ctx)
@@ -26,11 +30,21 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
   registerSyncRoutes(app, ctx)
   registerTokenRoutes(app, ctx)
 
-  app.get('/api/v1/health', async () => ({
-    ok: true,
-    accounts: ctx.accounts.count(),
-    uptimeSeconds: Math.round(process.uptime()),
-  }))
+  app.get('/api/v1/health', async (request, reply) => {
+    // Touch the database so a broken volume or locked file shows up here,
+    // not just as failed searches.
+    try {
+      return {
+        ok: true,
+        database: 'ok',
+        accounts: ctx.accounts.count(),
+        uptimeSeconds: Math.round(process.uptime()),
+      }
+    } catch (err) {
+      request.log.error({ err }, 'health check failed')
+      return reply.code(503).send({ ok: false, database: 'unavailable' })
+    }
+  })
 
   app.setNotFoundHandler((request, reply) => {
     if (request.url.startsWith('/api/')) {

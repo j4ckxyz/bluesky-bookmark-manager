@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { exportFilename, toCsv, toJson, toNdjson, toNetscapeHtml } from '../src/export.ts'
+import { exportFilename, streamExport, toCsv, toJson, toNdjson, toNetscapeHtml, type ExportFormat } from '../src/export.ts'
 import { extractMetadata, postUrlFromUri } from '../src/metadata.ts'
 import type { BookmarkRecord } from '../src/types.ts'
 import { bookmarkView } from './fixtures/bookmarks.ts'
@@ -165,6 +165,32 @@ describe('CSV export', () => {
     assert.match(csv, /one two/)
     assert.match(csv, /https:\/\/a\.example\/x https:\/\/b\.example\/y/)
     assert.match(csv, /en cy/)
+  })
+})
+
+describe('streamed export', () => {
+  const all = [1, 2, 3, 4, 5].map((n) =>
+    record({ uri: `at://did:plc:a/app.bsky.feed.post/${n}`, text: `post ${n}`, handle: 'a.test' }),
+  )
+  const stripTimestamp = (text: string) => text.replace(/"exportedAt": "[^"]+"/, '"exportedAt": ""')
+
+  it('produces the same output across page boundaries as in one go', () => {
+    for (const format of ['html', 'json', 'csv', 'ndjson'] as ExportFormat[]) {
+      const paged = [...streamExport(format, [all.slice(0, 2), [], all.slice(2)], 'a.test', all.length)].join('')
+      const whole = [...streamExport(format, [all], 'a.test', all.length)].join('')
+      assert.equal(stripTimestamp(paged), stripTimestamp(whole), format)
+    }
+  })
+
+  it('streams JSON identical to a single stringify, including when empty', () => {
+    for (const bookmarks of [all, []]) {
+      const streamed = JSON.parse([...streamExport('json', [bookmarks], 'a.test', bookmarks.length)].join(''))
+      assert.equal(streamed.count, bookmarks.length)
+      assert.deepEqual(streamed.bookmarks, JSON.parse(JSON.stringify(bookmarks)))
+      const text = [...streamExport('json', [bookmarks], 'a.test', bookmarks.length)].join('')
+      const expected = `${JSON.stringify({ ...JSON.parse(text), bookmarks }, null, 2)}\n`
+      assert.equal(text, expected)
+    }
   })
 })
 

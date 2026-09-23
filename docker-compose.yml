@@ -13,6 +13,16 @@ services:
     volumes:
       - bookmarks-data:/data
 
+    # Hardening: the app only ever writes to /data, runs as the unprivileged
+    # node user, and needs no Linux capabilities.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
     # Every value below is read from .env (copy .env.example to .env).
     # Blank means "use the server's own default", so defaults live in exactly
     # one place — server/src/config.ts — and cannot drift out of sync here.

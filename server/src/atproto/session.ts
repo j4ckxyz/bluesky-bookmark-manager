@@ -4,6 +4,7 @@ import type { SessionData } from '@atproto/lex-password-session'
 import type { AccountStore, StoredSession } from '../db/accounts.ts'
 import { IdentityError, IdentityResolver, normaliseServiceUrl, providerLabelFor } from './identity.ts'
 import type { Config } from '../config.ts'
+import { timedFetch } from '../lib/http.ts'
 
 export class AuthError extends Error {
   override name = 'AuthError'
@@ -67,6 +68,7 @@ export class SessionManager {
     let resolvedHandle = identifier
     let displayName: string | null = null
     let avatar: string | null = null
+    let profileLoaded = false
 
     if (input.service) {
       service = normaliseServiceUrl(input.service)
@@ -77,6 +79,7 @@ export class SessionManager {
         resolvedHandle = identity.handle
         displayName = identity.displayName
         avatar = identity.avatar
+        profileLoaded = true
       } catch (err) {
         if (err instanceof IdentityError) {
           throw new AuthError('invalid_credentials', err.message)
@@ -103,15 +106,19 @@ export class SessionManager {
 
     const did = session.did
     this.#assertAllowed(session.handle)
-    this.#assertCapacity(did)
 
-    if (!displayName && !avatar) {
-      const profile = await this.#identity.resolve(did).catch(() => null)
+    // Resolution already fetched the profile unless a provider was given; an
+    // account with no display name or avatar is common and needs no retry.
+    if (!profileLoaded) {
+      const profile = await this.#identity.profile(did)
       displayName = profile?.displayName ?? null
       avatar = profile?.avatar ?? null
       resolvedHandle = profile?.handle ?? session.handle
     }
 
+    // Checked after the last await, so the check and the insert below run
+    // back to back and two first-time logins cannot both claim the instance.
+    this.#assertCapacity(did)
     this.#accounts.upsert({
       did,
       handle: resolvedHandle || session.handle,
@@ -194,6 +201,7 @@ export class SessionManager {
   #sessionHooks() {
     const accounts = this.#accounts
     return {
+      fetch: timedFetch,
       onUpdated(this: PasswordSession, data: SessionData) {
         accounts.saveSession(data.did, data as StoredSession)
       },

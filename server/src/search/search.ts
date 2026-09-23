@@ -132,8 +132,9 @@ export class SearchService {
       .prepare(`SELECT b.*, ${scoreSql} AS score ${tail} ORDER BY ${orderBy(sort, scored)} LIMIT ? OFFSET ?`)
       .all(...scoreParams, ...conditionParams, limit, offset) as Array<BookmarkRow & { score: number }>
 
-    const results = rows.map((row) => {
-      const record = this.#bookmarks.hydrate(row)
+    const records = this.#bookmarks.hydrateMany(rows)
+    const results = rows.map((row, index) => {
+      const record = records[index]!
       record.score = Math.round(row.score * 10_000) / 10_000
       if (plan.highlightTerms.length > 0) record.highlights = plan.highlightTerms
       return record

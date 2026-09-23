@@ -342,100 +342,131 @@ export class BookmarkStore {
 
   /** Expands a row plus its child tables into an API-shaped record. */
   hydrate(row: BookmarkRow): BookmarkRecord {
-    const links = this.#db
-      .prepare('SELECT url, domain, source, title FROM bookmark_links WHERE bookmark_id = ?')
-      .all(row.id) as Array<{
-      url: string
-      domain: string
-      source: string
-      title: string | null
-    }>
-    const mentions = this.#db
-      .prepare('SELECT did, handle FROM bookmark_mentions WHERE bookmark_id = ?')
-      .all(row.id) as Array<{ did: string | null; handle: string | null }>
-    const tags = this.#db
-      .prepare('SELECT tag FROM bookmark_tags WHERE bookmark_id = ?')
-      .all(row.id) as Array<{ tag: string }>
+    return this.hydrateMany([row])[0]!
+  }
 
-    return {
-      id: row.id,
-      uri: row.uri,
-      cid: row.cid,
-      rkey: row.rkey,
-      bookmarkedAt: row.bookmarked_at,
-      itemState: row.item_state as BookmarkRecord['itemState'],
-      status: row.status === 'removed' ? 'removed' : 'active',
-      firstSeenAt: row.first_seen_at,
-      lastSeenAt: row.last_seen_at,
-      removedAt: row.removed_at,
-      postUrl: postUrlFromUri(row.uri, row.author_handle),
-
-      authorDid: row.author_did,
-      authorHandle: row.author_handle,
-      authorDisplayName: row.author_display_name,
-      authorAvatar: row.author_avatar,
-      authorVerified: row.author_verified === 1,
-      authorTrustedVerifier: row.author_trusted_verifier === 1,
-
-      text: row.text ?? '',
-      createdAt: row.created_at,
-      indexedAt: row.indexed_at,
-
-      isReply: row.is_reply === 1,
-      isRoot: row.is_root === 1,
-      isSelfReply: row.is_self_reply === 1,
-      replyRootUri: row.reply_root_uri,
-      replyParentUri: row.reply_parent_uri,
-      replyParentDid: row.reply_parent_did,
-
-      isQuote: row.is_quote === 1,
-      quotedUri: row.quoted_uri,
-      quotedAuthorHandle: row.quoted_author_handle,
-      quotedText: row.quoted_text,
-
-      links: links.map((l) => ({
-        url: l.url,
-        domain: l.domain,
-        source: l.source as BookmarkLink['source'],
-        ...(l.title ? { title: l.title } : {}),
-      })),
-      hasLinks: row.has_links === 1,
-      linkCount: row.link_count,
-      primaryDomain: row.primary_domain,
-
-      hasImages: row.has_images === 1,
-      imageCount: row.image_count,
-      altText: row.alt_text ?? '',
-      hasAltText: row.has_alt_text === 1,
-      hasVideo: row.has_video === 1,
-      hasMedia: row.has_media === 1,
-
-      hasExternal: row.has_external === 1,
-      externalUri: row.external_uri,
-      externalTitle: row.external_title,
-      externalDescription: row.external_description,
-      externalThumb: row.external_thumb,
-
-      mentions: mentions.map((m) => ({
-        ...(m.did ? { did: m.did } : {}),
-        ...(m.handle ? { handle: m.handle } : {}),
-      })),
-      mentionCount: row.mention_count,
-      tags: tags.map((t) => t.tag),
-      tagCount: row.tag_count,
-      langs: jsonArray(row.langs),
-      labels: jsonArray(row.labels),
-      hasLabels: row.has_labels === 1,
-
-      wordCount: row.word_count,
-      charCount: row.char_count,
-
-      likeCount: row.like_count,
-      repostCount: row.repost_count,
-      replyCount: row.reply_count,
-      quoteCount: row.quote_count,
-      bookmarkCount: row.bookmark_count,
+  /**
+   * Hydrates a whole page at once: three child-table queries for all rows,
+   * instead of three per row.
+   */
+  hydrateMany(rows: BookmarkRow[]): BookmarkRecord[] {
+    if (rows.length === 0) return []
+    const ids = rows.map((row) => row.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const children = <T extends { bookmark_id: number }>(sql: string): Map<number, T[]> => {
+      const grouped = new Map<number, T[]>()
+      for (const child of this.#db.prepare(sql).all(...ids) as T[]) {
+        const list = grouped.get(child.bookmark_id)
+        if (list) list.push(child)
+        else grouped.set(child.bookmark_id, [child])
+      }
+      return grouped
     }
+
+    const links = children<ChildLink>(
+      `SELECT bookmark_id, url, domain, source, title FROM bookmark_links WHERE bookmark_id IN (${placeholders}) ORDER BY rowid`,
+    )
+    const mentions = children<ChildMention>(
+      `SELECT bookmark_id, did, handle FROM bookmark_mentions WHERE bookmark_id IN (${placeholders}) ORDER BY rowid`,
+    )
+    const tags = children<ChildTag>(
+      `SELECT bookmark_id, tag FROM bookmark_tags WHERE bookmark_id IN (${placeholders}) ORDER BY rowid`,
+    )
+
+    return rows.map((row) =>
+      toRecord(row, links.get(row.id) ?? [], mentions.get(row.id) ?? [], tags.get(row.id) ?? []),
+    )
+  }
+}
+
+type ChildLink = { bookmark_id: number; url: string; domain: string; source: string; title: string | null }
+type ChildMention = { bookmark_id: number; did: string | null; handle: string | null }
+type ChildTag = { bookmark_id: number; tag: string }
+
+function toRecord(
+  row: BookmarkRow,
+  links: ChildLink[],
+  mentions: ChildMention[],
+  tags: ChildTag[],
+): BookmarkRecord {
+  return {
+    id: row.id,
+    uri: row.uri,
+    cid: row.cid,
+    rkey: row.rkey,
+    bookmarkedAt: row.bookmarked_at,
+    itemState: row.item_state as BookmarkRecord['itemState'],
+    status: row.status === 'removed' ? 'removed' : 'active',
+    firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
+    removedAt: row.removed_at,
+    postUrl: postUrlFromUri(row.uri, row.author_handle),
+
+    authorDid: row.author_did,
+    authorHandle: row.author_handle,
+    authorDisplayName: row.author_display_name,
+    authorAvatar: row.author_avatar,
+    authorVerified: row.author_verified === 1,
+    authorTrustedVerifier: row.author_trusted_verifier === 1,
+
+    text: row.text ?? '',
+    createdAt: row.created_at,
+    indexedAt: row.indexed_at,
+
+    isReply: row.is_reply === 1,
+    isRoot: row.is_root === 1,
+    isSelfReply: row.is_self_reply === 1,
+    replyRootUri: row.reply_root_uri,
+    replyParentUri: row.reply_parent_uri,
+    replyParentDid: row.reply_parent_did,
+
+    isQuote: row.is_quote === 1,
+    quotedUri: row.quoted_uri,
+    quotedAuthorHandle: row.quoted_author_handle,
+    quotedText: row.quoted_text,
+
+    links: links.map((l) => ({
+      url: l.url,
+      domain: l.domain,
+      source: l.source as BookmarkLink['source'],
+      ...(l.title ? { title: l.title } : {}),
+    })),
+    hasLinks: row.has_links === 1,
+    linkCount: row.link_count,
+    primaryDomain: row.primary_domain,
+
+    hasImages: row.has_images === 1,
+    imageCount: row.image_count,
+    altText: row.alt_text ?? '',
+    hasAltText: row.has_alt_text === 1,
+    hasVideo: row.has_video === 1,
+    hasMedia: row.has_media === 1,
+
+    hasExternal: row.has_external === 1,
+    externalUri: row.external_uri,
+    externalTitle: row.external_title,
+    externalDescription: row.external_description,
+    externalThumb: row.external_thumb,
+
+    mentions: mentions.map((m) => ({
+      ...(m.did ? { did: m.did } : {}),
+      ...(m.handle ? { handle: m.handle } : {}),
+    })),
+    mentionCount: row.mention_count,
+    tags: tags.map((t) => t.tag),
+    tagCount: row.tag_count,
+    langs: jsonArray(row.langs),
+    labels: jsonArray(row.labels),
+    hasLabels: row.has_labels === 1,
+
+    wordCount: row.word_count,
+    charCount: row.char_count,
+
+    likeCount: row.like_count,
+    repostCount: row.repost_count,
+    replyCount: row.reply_count,
+    quoteCount: row.quote_count,
+    bookmarkCount: row.bookmark_count,
   }
 }
 

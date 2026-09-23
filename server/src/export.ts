@@ -54,7 +54,11 @@ function titleFor(bookmark: BookmarkRecord): string {
  * of which importers generally preserve.
  */
 export function toNetscapeHtml(bookmarks: BookmarkRecord[], handle: string): string {
-  const lines: string[] = [
+  return [...streamNetscapeHtml([bookmarks], handle)].join('')
+}
+
+function* streamNetscapeHtml(pages: Iterable<BookmarkRecord[]>, handle: string): Generator<string> {
+  yield [
     '<!DOCTYPE NETSCAPE-Bookmark-file-1>',
     '<!-- This is an automatically generated file.',
     '     It will be read and overwritten.',
@@ -65,28 +69,32 @@ export function toNetscapeHtml(bookmarks: BookmarkRecord[], handle: string): str
     '<DL><p>',
     `    <DT><H3>Bluesky bookmarks — @${escapeHtml(handle)}</H3>`,
     '    <DL><p>',
-  ]
+    '',
+  ].join('\n')
 
-  for (const bookmark of bookmarks) {
-    const href = bookmark.postUrl ?? bookmark.uri
-    const tags = buildTags(bookmark)
-    const attributes = [
-      `HREF="${escapeHtml(href)}"`,
-      `ADD_DATE="${unixSeconds(bookmark.bookmarkedAt)}"`,
-      `LAST_MODIFIED="${unixSeconds(bookmark.createdAt)}"`,
-      tags.length > 0 ? `TAGS="${escapeHtml(tags.join(','))}"` : '',
-    ]
-      .filter(Boolean)
-      .join(' ')
+  for (const page of pages) {
+    const lines: string[] = []
+    for (const bookmark of page) {
+      const href = bookmark.postUrl ?? bookmark.uri
+      const tags = buildTags(bookmark)
+      const attributes = [
+        `HREF="${escapeHtml(href)}"`,
+        `ADD_DATE="${unixSeconds(bookmark.bookmarkedAt)}"`,
+        `LAST_MODIFIED="${unixSeconds(bookmark.createdAt)}"`,
+        tags.length > 0 ? `TAGS="${escapeHtml(tags.join(','))}"` : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
 
-    lines.push(`        <DT><A ${attributes}>${escapeHtml(titleFor(bookmark))}</A>`)
+      lines.push(`        <DT><A ${attributes}>${escapeHtml(titleFor(bookmark))}</A>`)
 
-    const description = buildDescription(bookmark)
-    if (description) lines.push(`        <DD>${escapeHtml(description)}`)
+      const description = buildDescription(bookmark)
+      if (description) lines.push(`        <DD>${escapeHtml(description)}`)
+    }
+    if (lines.length > 0) yield `${lines.join('\n')}\n`
   }
 
-  lines.push('    </DL><p>', '</DL><p>', '')
-  return lines.join('\n')
+  yield '    </DL><p>\n</DL><p>\n'
 }
 
 /** Tag list carried into importers: hashtags plus derived facets. */
@@ -118,21 +126,47 @@ function buildDescription(bookmark: BookmarkRecord): string {
 }
 
 export function toJson(bookmarks: BookmarkRecord[], handle: string): string {
-  return `${JSON.stringify(
+  return [...streamJson([bookmarks], handle, bookmarks.length)].join('')
+}
+
+/**
+ * Emits the same pretty-printed document as `JSON.stringify(doc, null, 2)`,
+ * one page at a time. `count` must be known up front since it precedes the list.
+ */
+function* streamJson(pages: Iterable<BookmarkRecord[]>, handle: string, count: number): Generator<string> {
+  const envelope = JSON.stringify(
     {
       $schema: 'https://github.com/j4ckxyz/bluesky-bookmark-manager/export/v1',
       exportedAt: new Date().toISOString(),
       account: handle,
-      count: bookmarks.length,
-      bookmarks,
+      count,
+      bookmarks: [],
     },
     null,
     2,
-  )}\n`
+  )
+  const [head] = envelope.split('"bookmarks": []')
+  yield `${head}"bookmarks": [`
+
+  let first = true
+  for (const page of pages) {
+    if (page.length === 0) continue
+    const items = page.map((bookmark) => `    ${JSON.stringify(bookmark, null, 2).replace(/\n/g, '\n    ')}`)
+    yield `${first ? '\n' : ',\n'}${items.join(',\n')}`
+    first = false
+  }
+
+  yield first ? ']\n}\n' : '\n  ]\n}\n'
 }
 
 export function toNdjson(bookmarks: BookmarkRecord[]): string {
-  return bookmarks.map((bookmark) => JSON.stringify(bookmark)).join('\n') + (bookmarks.length ? '\n' : '')
+  return [...streamNdjson([bookmarks])].join('')
+}
+
+function* streamNdjson(pages: Iterable<BookmarkRecord[]>): Generator<string> {
+  for (const page of pages) {
+    if (page.length > 0) yield page.map((bookmark) => `${JSON.stringify(bookmark)}\n`).join('')
+  }
 }
 
 const CSV_COLUMNS = [
@@ -176,10 +210,14 @@ function csvCell(value: unknown): string {
 }
 
 export function toCsv(bookmarks: BookmarkRecord[]): string {
-  const rows: string[] = [CSV_COLUMNS.join(',')]
+  return [...streamCsv([bookmarks])].join('')
+}
 
-  for (const b of bookmarks) {
-    rows.push(
+function* streamCsv(pages: Iterable<BookmarkRecord[]>): Generator<string> {
+  yield `${CSV_COLUMNS.join(',')}\r\n`
+
+  for (const page of pages) {
+    const rows = page.map((b) =>
       [
         b.uri,
         b.postUrl ?? '',
@@ -212,24 +250,28 @@ export function toCsv(bookmarks: BookmarkRecord[]): string {
         .map(csvCell)
         .join(','),
     )
+    if (rows.length > 0) yield `${rows.join('\r\n')}\r\n`
   }
-
-  return `${rows.join('\r\n')}\r\n`
 }
 
-export function renderExport(
+/**
+ * Renders an export incrementally from pages of results, so a large archive
+ * never has to sit in memory as one array or one string.
+ */
+export function streamExport(
   format: ExportFormat,
-  bookmarks: BookmarkRecord[],
+  pages: Iterable<BookmarkRecord[]>,
   handle: string,
-): string {
+  count: number,
+): Generator<string> {
   switch (format) {
     case 'html':
-      return toNetscapeHtml(bookmarks, handle)
+      return streamNetscapeHtml(pages, handle)
     case 'json':
-      return toJson(bookmarks, handle)
+      return streamJson(pages, handle, count)
     case 'csv':
-      return toCsv(bookmarks)
+      return streamCsv(pages)
     case 'ndjson':
-      return toNdjson(bookmarks)
+      return streamNdjson(pages)
   }
 }

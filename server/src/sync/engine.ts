@@ -34,6 +34,12 @@ export type RunOptions = {
   fetcher?: BookmarkPageFetcher
 }
 
+/**
+ * Ceiling on pages per run, so a PDS that never stops handing out cursors
+ * cannot hold a sync slot forever. 10k pages of 100 is a million bookmarks.
+ */
+const MAX_SYNC_PAGES = 10_000
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Wraps a live client as a page fetcher over `app.bsky.bookmark.getBookmarks`. */
@@ -199,10 +205,16 @@ export class SyncEngine extends EventEmitter<SyncEngineEvents> {
         progress.totalStored = this.#bookmarks.countActive(did)
         this.#publish(did, progress)
 
+        if (page.cursor && page.cursor === cursor) {
+          throw new Error('Your hosting provider returned the same page twice; stopping this sync')
+        }
         cursor = page.cursor
         if (!cursor || page.bookmarks.length === 0) {
           completedWalk = true
           break
+        }
+        if (progress.pages >= MAX_SYNC_PAGES) {
+          throw new Error(`Stopped after ${MAX_SYNC_PAGES} pages without reaching the end of the list`)
         }
 
         // A quick pass only needs to reach the point where everything is

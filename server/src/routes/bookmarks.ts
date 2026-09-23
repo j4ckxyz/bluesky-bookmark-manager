@@ -1,9 +1,13 @@
 import type { FastifyInstance } from 'fastify'
+import { Readable } from 'node:stream'
 import type { AppContext } from '../context.ts'
-import { EXPORT_FORMATS, exportFilename, renderExport, type ExportFormat } from '../export.ts'
+import { EXPORT_FORMATS, exportFilename, streamExport, type ExportFormat } from '../export.ts'
 import type { SearchOptions, SortOrder, StatusFilter } from '../search/search.ts'
 import { computeStats } from '../stats.ts'
 import { requireAccount } from './auth-plugin.ts'
+
+/** Search caps a page at 200, so export reads in pages of that size. */
+const EXPORT_PAGE = 200
 
 type SearchQuery = {
   q?: string
@@ -192,18 +196,24 @@ export function registerBookmarkRoutes(app: FastifyInstance, ctx: AppContext): v
         })
       }
 
-      // Page through everything that matches rather than capping at a page.
-      const options = toSearchOptions(request.query, { limit: 500 })
-      const all = []
-      let offset = 0
-      for (;;) {
-        const page = ctx.search.search(account.did, { ...options, limit: 500, offset, withFacets: false })
-        all.push(...page.results)
-        offset += page.results.length
-        if (page.results.length === 0 || offset >= page.total) break
+      // Page through everything that matches, rendering as each page is read,
+      // so a large archive streams out instead of being built up in memory.
+      const options = { ...toSearchOptions(request.query, { limit: EXPORT_PAGE }), withFacets: false }
+      const first = ctx.search.search(account.did, { ...options, limit: EXPORT_PAGE, offset: 0 })
+      const search = ctx.search
+      const did = account.did
+      function* pages() {
+        yield first.results
+        let offset = first.results.length
+        while (offset < first.total) {
+          const page = search.search(did, { ...options, limit: EXPORT_PAGE, offset })
+          if (page.results.length === 0) return
+          yield page.results
+          offset += page.results.length
+        }
       }
 
-      const body = renderExport(format, all, account.handle)
+      const body = Readable.from(streamExport(format, pages(), account.handle, first.total))
       const meta = EXPORT_FORMATS[format]
 
       return reply
@@ -212,7 +222,7 @@ export function registerBookmarkRoutes(app: FastifyInstance, ctx: AppContext): v
           'content-disposition',
           `attachment; filename="${exportFilename(format, account.handle)}"`,
         )
-        .header('x-bookmark-count', String(all.length))
+        .header('x-bookmark-count', String(first.total))
         .send(body)
     },
   )

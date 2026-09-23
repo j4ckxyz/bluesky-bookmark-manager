@@ -82,12 +82,12 @@ export class AccountStore {
   }): AccountRecord {
     const now = new Date().toISOString()
     const blob = encryptJson(this.#key, input.session)
-    const isFirst = this.count() === 0
 
     this.#db
       .prepare(
         `INSERT INTO accounts (did, handle, display_name, avatar, pds_url, session_blob, is_owner, created_at, updated_at)
-         VALUES (@did, @handle, @displayName, @avatar, @pdsUrl, @blob, @isOwner, @now, @now)
+         VALUES (@did, @handle, @displayName, @avatar, @pdsUrl, @blob,
+                 (SELECT count(*) = 0 FROM accounts), @now, @now)
          ON CONFLICT(did) DO UPDATE SET
            handle       = excluded.handle,
            display_name = excluded.display_name,
@@ -104,7 +104,6 @@ export class AccountStore {
         avatar: input.avatar,
         pdsUrl: input.pdsUrl,
         blob,
-        isOwner: isFirst ? 1 : 0,
         now,
       })
 
