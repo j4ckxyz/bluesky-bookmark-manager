@@ -4,6 +4,7 @@ import { api } from '../lib/api.ts'
 import { fullDate, relativeTime } from '../lib/format.ts'
 import type { ThemePreference } from '../lib/hooks.ts'
 import type { Account, ApiToken, InstanceInfo } from '../lib/types.ts'
+import { ConfirmButton } from './ConfirmButton.tsx'
 
 type Props = {
   account: Account
@@ -204,23 +205,23 @@ export function SettingsView({
                     {token.lastUsedAt ? `last used ${relativeTime(token.lastUsedAt)}` : 'never used'}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="button button--small button--ghost"
-                  onClick={() => void revoke(token.hint)}
+                <ConfirmButton
+                  className="button--small"
+                  confirmLabel="Click to revoke"
+                  onConfirm={() => void revoke(token.hint)}
                   disabled={busy}
                   aria-label={`Revoke ${token.name}`}
                 >
                   <Trash2 size={13} />
                   Revoke
-                </button>
+                </ConfirmButton>
               </div>
             ))}
           </div>
         )}
 
         {error && (
-          <div className="error-box" style={{ marginTop: 12 }}>
+          <div className="error-box" role="alert" style={{ marginTop: 12 }}>
             {error}
           </div>
         )}
@@ -252,15 +253,14 @@ export function SettingsView({
               back in resumes rather than starting over.
             </div>
           </div>
-          <button
-            type="button"
-            className="button button--small"
-            style={{ color: 'var(--danger)' }}
-            onClick={() => void api.disconnect().then(onSignedOut)}
+          <ConfirmButton
+            className="button--small"
+            confirmLabel="Click to disconnect"
+            onConfirm={() => void api.disconnect().then(onSignedOut)}
           >
             <Unplug size={13} />
             Disconnect
-          </button>
+          </ConfirmButton>
         </div>
       </section>
     </div>

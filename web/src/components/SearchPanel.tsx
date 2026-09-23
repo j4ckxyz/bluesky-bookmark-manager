@@ -93,6 +93,36 @@ export function SearchPanel(props: Props) {
   const [showExport, setShowExport] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const exportRef = useDismiss(() => setShowExport(false), showExport)
+  const exportButtonRef = useRef<HTMLButtonElement>(null)
+  const exportWasOpen = useRef(false)
+
+  // Menu-button pattern: focus moves into the menu when it opens and back to
+  // the button when it closes, so keyboard users are never stranded.
+  useEffect(() => {
+    if (showExport) {
+      exportRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    } else if (exportWasOpen.current && exportRef.current?.contains(document.activeElement)) {
+      exportButtonRef.current?.focus()
+    }
+    exportWasOpen.current = showExport
+  }, [showExport, exportRef])
+
+  const onExportMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') {
+      return
+    }
+    event.preventDefault()
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    if (items.length === 0) return
+    const current = items.indexOf(document.activeElement as HTMLElement)
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    items[next]?.focus()
+  }
 
   // "/" focuses search, the way every search-first tool behaves.
   useEffect(() => {
@@ -204,16 +234,18 @@ export function SearchPanel(props: Props) {
 
         <div className="dropdown" ref={exportRef}>
           <button
+            ref={exportButtonRef}
             type="button"
             className="button button--small"
             onClick={() => setShowExport((open) => !open)}
             aria-expanded={showExport}
+            aria-haspopup="menu"
           >
             <Download size={13} />
             Export
           </button>
           {showExport && (
-            <div className="dropdown__menu" role="menu">
+            <div className="dropdown__menu" role="menu" aria-label="Export" onKeyDown={onExportMenuKeyDown}>
               <p className="hint" style={{ padding: '6px 9px 8px' }}>
                 Exports whatever your current search matches.
               </p>

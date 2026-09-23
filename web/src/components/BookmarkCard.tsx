@@ -83,6 +83,7 @@ function LinkCard({
           <span className="bookmark__link-desc">{description}</span>
         )}
         <span className="bookmark__link-domain">{domain}</span>
+        <span className="visually-hidden"> (opens in a new tab)</span>
       </span>
     </a>
   )

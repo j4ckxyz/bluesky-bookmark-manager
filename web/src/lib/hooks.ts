@@ -129,3 +129,46 @@ export function useDismiss(onDismiss: () => void, active = true) {
 
   return ref
 }
+
+/** How often, at most, to ask the server whether a newer build is deployed. */
+const VERSION_CHECK_MS = 5 * 60_000
+
+/**
+ * True once the server is serving a different build from the one this tab is
+ * running. An installed app can stay open for days; this is how it finds out
+ * it is talking to a newer back end. The check compares the hashed bundle
+ * named in the live index.html with the one this page loaded.
+ */
+export function useNewVersionAvailable(): boolean {
+  const [available, setAvailable] = useState(false)
+
+  useEffect(() => {
+    const script = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/"]')
+    // Dev server, or no hashed bundle to compare against.
+    if (!script) return
+    const current = new URL(script.src).pathname
+
+    let lastChecked = 0
+    const check = async (): Promise<void> => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastChecked < VERSION_CHECK_MS) return
+      lastChecked = Date.now()
+      try {
+        const response = await fetch('/', { cache: 'no-store', headers: { accept: 'text/html' } })
+        if (!response.ok) return
+        const html = await response.text()
+        if (html.includes('/assets/') && !html.includes(current)) setAvailable(true)
+      } catch {
+        // Offline; try again next time the app comes to the front.
+      }
+    }
+
+    const timer = window.setInterval(() => void check(), VERSION_CHECK_MS)
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [])
+
+  return available
+}

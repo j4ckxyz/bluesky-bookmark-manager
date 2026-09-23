@@ -105,6 +105,9 @@ export function HandleTypeahead({ value, onChange, onPick, disabled, id }: Props
         aria-expanded={suggestions.length > 0}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-activedescendant={
+          suggestions.length > 0 && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
+        }
         onChange={(event) => {
           onChange(event.target.value)
           setOpen(true)
@@ -120,6 +123,8 @@ export function HandleTypeahead({ value, onChange, onPick, disabled, id }: Props
               <button
                 type="button"
                 role="option"
+                id={`${listId}-${index}`}
+                tabIndex={-1}
                 aria-selected={index === activeIndex}
                 className={`typeahead__option${index === activeIndex ? ' typeahead__option--active' : ''}`}
                 onMouseEnter={() => setActiveIndex(index)}
@@ -128,7 +133,7 @@ export function HandleTypeahead({ value, onChange, onPick, disabled, id }: Props
                 {actor.avatar ? (
                   <img className="typeahead__avatar" src={actor.avatar} alt="" loading="lazy" />
                 ) : (
-                  <span className="typeahead__avatar typeahead__option--active" aria-hidden="true">
+                  <span className="typeahead__avatar typeahead__avatar--placeholder" aria-hidden="true">
                     <User size={15} />
                   </span>
                 )}

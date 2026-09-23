@@ -16,7 +16,7 @@ import { SignIn } from './components/SignIn.tsx'
 import { StatsView } from './components/StatsView.tsx'
 import { SyncBanner } from './components/SyncBanner.tsx'
 import { api, type SearchParams } from './lib/api.ts'
-import { useDebounced, useSyncStatus, useTheme } from './lib/hooks.ts'
+import { useDebounced, useNewVersionAvailable, useSyncStatus, useTheme } from './lib/hooks.ts'
 import type {
   Account,
   InstanceInfo,
@@ -46,8 +46,11 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
+  /** Bumped to re-run the current search without touching its inputs. */
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const debouncedQuery = useDebounced(query, 220)
+  const newVersion = useNewVersionAvailable()
   const { status: syncStatus, setStatus: setSyncStatus } = useSyncStatus(account !== null)
   const previousSyncRef = useRef<string | null>(null)
 
@@ -112,7 +115,7 @@ export default function App() {
       })
 
     return () => controller.abort()
-  }, [account, tab, searchParams])
+  }, [account, tab, searchParams, refreshKey])
 
   // Refresh results the moment a sync finishes, so new bookmarks just appear.
   useEffect(() => {
@@ -123,12 +126,12 @@ export default function App() {
       previousSyncRef.current = key
       setSyncBusy(false)
       if (syncStatus.created + syncStatus.removed + syncStatus.restored > 0) {
-        setPage((current) => current) // keep position
-        setResponse(null)
-        void api.search(searchParams).then(setResponse).catch(() => undefined)
+        // Re-run the search in place: the current results stay on screen
+        // until the fresh page arrives, rather than flashing an empty state.
+        setRefreshKey((key) => key + 1)
       }
     }
-  }, [syncStatus, searchParams])
+  }, [syncStatus])
 
   const applyFilterFragment = useCallback((fragment: string): void => {
     setTab('search')
@@ -213,6 +216,15 @@ export default function App() {
       </header>
 
       <main className="main">
+        {newVersion && (
+          <div className="update-notice" role="status">
+            <span>A new version of the app is available.</span>
+            <button type="button" className="button button--small" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        )}
+
         {tab !== 'settings' && (
           <SyncBanner
             status={syncStatus}
@@ -243,7 +255,7 @@ export default function App() {
             />
 
             {searchError && (
-              <div className="error-box" style={{ marginTop: 16 }}>
+              <div className="error-box" role="alert" style={{ marginTop: 16 }}>
                 {searchError}
               </div>
             )}
