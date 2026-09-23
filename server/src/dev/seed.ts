@@ -31,10 +31,10 @@ function demoThumb(label: string, hue: number): string {
 }
 
 const AUTHORS = [
-  { did: 'did:plc:author01', handle: 'why.bsky.team', name: 'Paul Frazee', verified: true },
-  { did: 'did:plc:author02', handle: 'atproto.com', name: 'AT Protocol', verified: true },
-  { did: 'did:plc:author03', handle: 'ada.example.social', name: 'Ada Lovelace', verified: false },
-  { did: 'did:plc:author04', handle: 'grace.dev.social', name: 'Grace Hopper', verified: false },
+  { did: 'did:plc:author01', handle: 'sam.example.social', name: 'Sam Rivera', verified: true },
+  { did: 'did:plc:author02', handle: 'protocol-notes.example.com', name: 'Protocol Notes', verified: true },
+  { did: 'did:plc:author03', handle: 'maya.example.social', name: 'Maya Okafor', verified: false },
+  { did: 'did:plc:author04', handle: 'tom.example.dev', name: 'Tom Lindqvist', verified: false },
   { did: 'did:plc:author05', handle: 'newsroom.example.com', name: 'The Newsroom', verified: true },
   { did: 'did:plc:author06', handle: 'birdwatch.example.org', name: 'Birdwatch', verified: false },
 ]
@@ -115,7 +115,7 @@ const POSTS: Array<{
     text: 'Quoting this because the point about network effects deserves more attention than it got.',
     author: 4,
     quote: {
-      handle: 'why.bsky.team',
+      handle: 'sam.example.social',
       text: 'Network effects compound when users can leave without losing their audience. That changes the incentives for every operator on the network.',
     },
     links: ['https://github.com/bluesky-social/atproto'],
@@ -306,13 +306,13 @@ function main(): void {
 
   accounts.upsert({
     did: DEMO_DID,
-    handle: 'demo.bsky.social',
+    handle: 'demo.example.social',
     displayName: 'Demo account',
     avatar: null,
     pdsUrl: 'https://bsky.social',
     session: {
       did: DEMO_DID,
-      handle: 'demo.bsky.social',
+      handle: 'demo.example.social',
       accessJwt: 'demo-access-token',
       refreshJwt: 'demo-refresh-token',
       service: 'https://bsky.social',
@@ -347,7 +347,7 @@ function main(): void {
 
   const cookie = accounts.createAuthSession(DEMO_DID, 30, 'seed script')
 
-  console.log(`Seeded ${created} new bookmarks (${POSTS.length} total) for @demo.bsky.social`)
+  console.log(`Seeded ${created} new bookmarks (${POSTS.length} total) for @demo.example.social`)
   console.log(`Database: ${config.databasePath}`)
   console.log('')
   console.log('Sign in by setting this cookie on the site origin:')

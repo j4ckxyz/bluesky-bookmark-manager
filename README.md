@@ -8,6 +8,8 @@ new ones — and for ones you have removed on the Bluesky side. Everything is
 stored in a single SQLite file on your own machine, searchable through a fast
 full-text index and a rich API.
 
+![Searching a bookmark archive](docs/screenshots/search.png)
+
 Built on Bluesky's official [`@bsky/sdk`](https://www.npmjs.com/package/@bsky/sdk)
 and the `app.bsky.bookmark.*` lexicons.
 
@@ -36,6 +38,22 @@ and the `app.bsky.bookmark.*` lexicons.
   Pocket import), plus JSON, CSV and NDJSON.
 - **Has a real API.** Everything the interface does is available over
   `/api/v1` with a personal API token.
+
+## Screenshots
+
+All screenshots use the made-up demo data from `npm run seed:demo -w server`;
+the accounts and posts are not real.
+
+| Search with highlighted matches | Stats |
+| --- | --- |
+| ![A search for "lexicon" with the matching word highlighted](docs/screenshots/search-query.png) | ![Stats page with totals, a timeline and top accounts, domains and hashtags](docs/screenshots/stats.png) |
+| **Dark mode** | **Sign in** |
+| ![The bookmark list in dark mode](docs/screenshots/search-dark.png) | ![The sign-in screen asking for a handle and app password](docs/screenshots/sign-in.png) |
+
+<p align="center">
+  <img src="docs/screenshots/mobile.png" width="300" alt="The bookmark list on a phone-sized screen">
+  <br><em>On a phone, or installed as an app</em>
+</p>
 
 ## Quick start
 
