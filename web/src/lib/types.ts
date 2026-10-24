@@ -215,11 +215,17 @@ export type Stats = {
   sync: SyncProgress | null
 }
 
+/** `full` reaches all of `/api/v1`; `agent` only the read-only agent API. */
+export type TokenScope = 'full' | 'agent'
+
 export type ApiToken = {
   name: string
   hint: string
+  scope: TokenScope
   createdAt: string
   lastUsedAt: string | null
+  expiresAt: string | null
+  expired: boolean
 }
 
 export type Suggestions = {

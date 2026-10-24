@@ -2,6 +2,7 @@ import type { Db } from '../db/index.ts'
 import type { BookmarkStore, BookmarkRow } from '../db/bookmarks.ts'
 import type { BookmarkRecord } from '../types.ts'
 import { allowedEdits } from '../lib/fuzzy.ts'
+import { urlKey } from '../lib/url.ts'
 import { isEmptyQuery, parseQuery, type ParsedQuery, type TextTerm } from './query.ts'
 
 export type SortOrder =
@@ -12,6 +13,8 @@ export type SortOrder =
   | 'oldest-posted'
   | 'likes'
   | 'reposts'
+  | 'replies'
+  | 'random'
 
 export type StatusFilter = 'active' | 'removed' | 'all'
 
@@ -32,6 +35,35 @@ export type SearchOptions = {
     is?: string[]
     before?: string | null
     after?: string | null
+
+    // The rest have no UI control; the agent API exposes them.
+    notFrom?: string[]
+    /** Links to any of these domains (or their subdomains). */
+    anyDomains?: string[]
+    notDomains?: string[]
+    notTags?: string[]
+    notHas?: string[]
+    notIs?: string[]
+    savedBefore?: string | null
+    savedAfter?: string | null
+    /** Links to any of these exact pages, compared with {@link urlKey}. */
+    urls?: string[]
+    /** Has a link whose URL contains any of these, case-insensitively. */
+    urlContains?: string[]
+    /** Post text contains every one of these literally, case-insensitively. */
+    textContains?: string[]
+    minLikes?: number | null
+    maxLikes?: number | null
+    minReposts?: number | null
+    minReplies?: number | null
+    minQuotes?: number | null
+    minWords?: number | null
+    maxWords?: number | null
+    ids?: number[]
+    /** In the thread rooted at any of these AT-URIs, root included. */
+    threads?: string[]
+    /** Quotes any of these AT-URIs. */
+    quoting?: string[]
   }
   /** Compute facet counts over the matched set. Costs a few extra queries. */
   withFacets?: boolean
@@ -75,6 +107,17 @@ const MAX_FUZZY_ALTERNATIVES = 6
 /** FTS5 rejects table aliases in MATCH and bm25(), so the name is used bare. */
 const FTS = 'bookmarks_fts'
 
+type Filters = NonNullable<SearchOptions['filters']>
+
+/** The matched set for a search, before sorting and paging. */
+type Compiled = {
+  plan: MatchPlan
+  scored: boolean
+  from: string
+  conditions: string[]
+  params: unknown[]
+}
+
 type MatchPlan = {
   positive: string | null
   negative: string | null
@@ -96,26 +139,10 @@ export class SearchService {
   search(did: string, options: SearchOptions = {}): SearchResult {
     const startedAt = performance.now()
 
-    const parsed = mergeFilters(parseQuery(options.q ?? ''), options.filters)
     const limit = Math.min(200, Math.max(1, options.limit ?? 25))
     const offset = Math.max(0, options.offset ?? 0)
-    const plan = this.#planMatch(parsed)
-    const scored = plan.positive !== null
+    const { plan, scored, from, conditions, params: conditionParams } = this.#compile(did, options)
     const sort: SortOrder = options.sort ?? (scored ? 'relevance' : 'saved')
-
-    const where = this.#buildWhere(did, parsed, options.status ?? 'active')
-    const from = scored ? `FROM bookmarks b JOIN ${FTS} ON ${FTS}.rowid = b.id` : 'FROM bookmarks b'
-
-    const conditions = [where.sql]
-    const conditionParams = [...where.params]
-    if (plan.positive) {
-      conditions.push(`${FTS} MATCH ?`)
-      conditionParams.push(plan.positive)
-    }
-    if (plan.negative) {
-      conditions.push(`b.id NOT IN (SELECT rowid FROM ${FTS} WHERE ${FTS} MATCH ?)`)
-      conditionParams.push(plan.negative)
-    }
 
     const tail = `${from} WHERE ${conditions.join(' AND ')}`
 
@@ -156,6 +183,37 @@ export class SearchService {
     }
 
     return result
+  }
+
+  /**
+   * The ids of every bookmark a search would match, as a subquery, so other
+   * queries (link, author and timeline breakdowns) can aggregate over exactly
+   * the same set. Always scoped to `did`.
+   */
+  matchedIds(did: string, options: SearchOptions = {}): { sql: string; params: unknown[] } {
+    const { from, conditions, params } = this.#compile(did, options)
+    return { sql: `SELECT b.id ${from} WHERE ${conditions.join(' AND ')}`, params }
+  }
+
+  #compile(did: string, options: SearchOptions): Compiled {
+    const parsed = mergeFilters(parseQuery(options.q ?? ''), options.filters)
+    const plan = this.#planMatch(parsed)
+    const scored = plan.positive !== null
+
+    const where = this.#buildWhere(did, parsed, options.status ?? 'active', options.filters ?? {})
+    const from = scored ? `FROM bookmarks b JOIN ${FTS} ON ${FTS}.rowid = b.id` : 'FROM bookmarks b'
+
+    const conditions = [where.sql]
+    const params = [...where.params]
+    if (plan.positive) {
+      conditions.push(`${FTS} MATCH ?`)
+      params.push(plan.positive)
+    }
+    if (plan.negative) {
+      conditions.push(`b.id NOT IN (SELECT rowid FROM ${FTS} WHERE ${FTS} MATCH ?)`)
+      params.push(plan.negative)
+    }
+    return { plan, scored, from, conditions, params }
   }
 
   /**
@@ -263,7 +321,12 @@ export class SearchService {
     return parts.join(' + ')
   }
 
-  #buildWhere(did: string, query: ParsedQuery, status: StatusFilter): { sql: string; params: unknown[] } {
+  #buildWhere(
+    did: string,
+    query: ParsedQuery,
+    status: StatusFilter,
+    filters: Filters,
+  ): { sql: string; params: unknown[] } {
     const clauses: string[] = ['b.did = ?']
     const params: unknown[] = [did]
 
@@ -349,6 +412,10 @@ export class SearchService {
       params.push(query.savedBefore)
     }
 
+    const extra = extraClauses(filters)
+    clauses.push(...extra.clauses)
+    params.push(...extra.params)
+
     return { sql: clauses.join(' AND '), params }
   }
 
@@ -424,7 +491,102 @@ function orderBy(sort: SortOrder, scored: boolean): string {
       return 'COALESCE(b.like_count, 0) DESC, b.bookmarked_at DESC'
     case 'reposts':
       return 'COALESCE(b.repost_count, 0) DESC, b.bookmarked_at DESC'
+    case 'replies':
+      return 'COALESCE(b.reply_count, 0) DESC, b.bookmarked_at DESC'
+    case 'random':
+      return 'random()'
   }
+}
+
+/**
+ * Filters with no place in the query language. Each list matches any of its
+ * values, except `textContains`, where every value must appear.
+ */
+function extraClauses(filters: Filters): { clauses: string[]; params: unknown[] } {
+  const clauses: string[] = []
+  const params: unknown[] = []
+
+  const anyDomains = filters.anyDomains ?? []
+  if (anyDomains.length > 0) {
+    clauses.push(
+      `EXISTS (SELECT 1 FROM bookmark_links l WHERE l.bookmark_id = b.id AND (${anyDomains
+        .map(() => '(l.domain = ? OR l.domain LIKE ?)')
+        .join(' OR ')}))`,
+    )
+    for (const domain of anyDomains) params.push(domain, `%.${domain}`)
+  }
+  for (const domain of filters.notDomains ?? []) {
+    clauses.push(
+      'NOT EXISTS (SELECT 1 FROM bookmark_links l WHERE l.bookmark_id = b.id AND (l.domain = ? OR l.domain LIKE ?))',
+    )
+    params.push(domain, `%.${domain}`)
+  }
+
+  const notTags = filters.notTags ?? []
+  if (notTags.length > 0) {
+    clauses.push(
+      `NOT EXISTS (SELECT 1 FROM bookmark_tags t WHERE t.bookmark_id = b.id AND ${placeholders('t.tag', notTags)})`,
+    )
+    params.push(...notTags)
+  }
+
+  const urls = filters.urls ?? []
+  if (urls.length > 0) {
+    clauses.push(
+      `EXISTS (SELECT 1 FROM bookmark_links l WHERE l.bookmark_id = b.id AND ${placeholders('url_key(l.url)', urls)})`,
+    )
+    params.push(...urls.map(urlKey))
+  }
+
+  const urlContains = filters.urlContains ?? []
+  if (urlContains.length > 0) {
+    clauses.push(
+      `EXISTS (SELECT 1 FROM bookmark_links l WHERE l.bookmark_id = b.id AND (${urlContains
+        .map(() => 'instr(lower(l.url), ?) > 0')
+        .join(' OR ')}))`,
+    )
+    params.push(...urlContains.map((v) => v.toLowerCase()))
+  }
+
+  for (const needle of filters.textContains ?? []) {
+    clauses.push("instr(lower(COALESCE(b.text, '')), ?) > 0")
+    params.push(needle.toLowerCase())
+  }
+
+  const ranges: Array<[number | null | undefined, string]> = [
+    [filters.minLikes, 'COALESCE(b.like_count, 0) >= ?'],
+    [filters.maxLikes, 'COALESCE(b.like_count, 0) <= ?'],
+    [filters.minReposts, 'COALESCE(b.repost_count, 0) >= ?'],
+    [filters.minReplies, 'COALESCE(b.reply_count, 0) >= ?'],
+    [filters.minQuotes, 'COALESCE(b.quote_count, 0) >= ?'],
+    [filters.minWords, 'b.word_count >= ?'],
+    [filters.maxWords, 'b.word_count <= ?'],
+  ]
+  for (const [value, clause] of ranges) {
+    if (value === null || value === undefined) continue
+    clauses.push(clause)
+    params.push(value)
+  }
+
+  const ids = filters.ids ?? []
+  if (ids.length > 0) {
+    clauses.push(`b.id IN (${ids.map(() => '?').join(', ')})`)
+    params.push(...ids)
+  }
+
+  const threads = filters.threads ?? []
+  if (threads.length > 0) {
+    clauses.push(`(${placeholders('b.reply_root_uri', threads)} OR ${placeholders('b.uri', threads)})`)
+    params.push(...threads, ...threads)
+  }
+
+  const quoting = filters.quoting ?? []
+  if (quoting.length > 0) {
+    clauses.push(placeholders('b.quoted_uri', quoting))
+    params.push(...quoting)
+  }
+
+  return { clauses, params }
 }
 
 function placeholders(column: string, values: string[]): string {
@@ -500,6 +662,11 @@ function mergeFilters(query: ParsedQuery, filters: SearchOptions['filters']): Pa
     is: [...query.is, ...(filters.is ?? [])],
     before: filters.before ?? query.before,
     after: filters.after ?? query.after,
+    notFrom: [...query.notFrom, ...(filters.notFrom ?? []).map(clean)],
+    notHas: [...query.notHas, ...(filters.notHas ?? [])],
+    notIs: [...query.notIs, ...(filters.notIs ?? [])],
+    savedBefore: filters.savedBefore ?? query.savedBefore,
+    savedAfter: filters.savedAfter ?? query.savedAfter,
   }
 }
 

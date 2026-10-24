@@ -309,7 +309,7 @@ function applyField(query: ParsedQuery, field: string, rawValue: string, negated
 }
 
 /** Collapses plural aliases so `has:links` and `has:link` behave the same. */
-function canonicalHas(flag: string): string {
+export function canonicalHas(flag: string): string {
   switch (flag) {
     case 'links':
       return 'link'

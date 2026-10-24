@@ -115,6 +115,12 @@ export function loadConfig() {
     allowedHandles: list('ALLOWED_HANDLES'),
 
     sessionTtlDays: int('SESSION_TTL_DAYS', 30),
+    /**
+     * Requests per minute per token on the agent API. Generous by default: it
+     * is your own server, and an agent paging through a large archive should
+     * not stall. Lower it if you expose the instance to the internet.
+     */
+    agentRateLimitPerMinute: Math.max(1, int('AGENT_RATE_LIMIT_PER_MINUTE', 600)),
     secureCookies: bool('SECURE_COOKIES', publicUrl.startsWith('https://')),
     trustProxy: bool('TRUST_PROXY', false),
     logLevel: str('LOG_LEVEL', 'info'),

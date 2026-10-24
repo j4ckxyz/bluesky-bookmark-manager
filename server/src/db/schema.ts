@@ -201,4 +201,14 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE bookmarks ADD COLUMN external_thumb TEXT;
     `,
   },
+  {
+    // Token scopes: a `full` token reaches the whole `/api/v1` surface, an
+    // `agent` token only the read-only `/api/agent/v1` surface. Existing
+    // tokens keep the access they were created with. Tokens may also expire.
+    name: '003_token_scopes',
+    sql: /* sql */ `
+      ALTER TABLE api_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'full';
+      ALTER TABLE api_tokens ADD COLUMN expires_at TEXT;
+    `,
+  },
 ]

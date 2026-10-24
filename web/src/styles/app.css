@@ -1418,6 +1418,27 @@ mark {
   margin: 0;
 }
 
+.skill-preview {
+  margin-bottom: var(--space-4);
+}
+
+.skill-preview > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.skill-preview > summary:hover {
+  color: var(--text);
+}
+
+.skill-preview > .code-block {
+  margin-top: var(--space-2);
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .token-row {
   display: flex;
   align-items: center;

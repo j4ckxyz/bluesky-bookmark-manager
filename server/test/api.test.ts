@@ -2,67 +2,9 @@ import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import type { FastifyInstance } from 'fastify'
 import { createApp } from '../src/app.ts'
-import { AccountStore } from '../src/db/accounts.ts'
-import { BookmarkStore } from '../src/db/bookmarks.ts'
-import { openDatabase } from '../src/db/index.ts'
-import { SearchService } from '../src/search/search.ts'
-import { SyncEngine } from '../src/sync/engine.ts'
-import { SyncRunStore } from '../src/sync/runs.ts'
-import { SyncScheduler } from '../src/sync/scheduler.ts'
-import { IdentityResolver } from '../src/atproto/identity.ts'
-import { SessionManager } from '../src/atproto/session.ts'
 import type { AppContext } from '../src/context.ts'
 import { bookmarkView, pagedFetcher } from './fixtures/bookmarks.ts'
-import { testConfig, TEST_DID } from './helpers.ts'
-
-/**
- * Builds a real app over an in-memory database, with one signed-in account
- * and a browser session cookie already issued.
- */
-function buildApp() {
-  const config = testConfig()
-  const db = openDatabase(':memory:')
-  const accounts = new AccountStore(db, config.encryptionKey)
-  const bookmarks = new BookmarkStore(db)
-  const runs = new SyncRunStore(db)
-  const search = new SearchService(db, bookmarks)
-  const identity = new IdentityResolver(config)
-  const sessions = new SessionManager(config, accounts, identity)
-  const engine = new SyncEngine({ config, accounts, bookmarks, runs, clientFor: async () => null })
-  const scheduler = new SyncScheduler({ config, accounts, engine })
-
-  const ctx: AppContext = {
-    config,
-    db,
-    accounts,
-    bookmarks,
-    runs,
-    search,
-    identity,
-    sessions,
-    engine,
-    scheduler,
-    close: () => db.close(),
-  }
-
-  accounts.upsert({
-    did: TEST_DID,
-    handle: 'owner.bsky.social',
-    displayName: 'Owner',
-    avatar: null,
-    pdsUrl: 'https://bsky.social',
-    session: {
-      did: TEST_DID,
-      handle: 'owner.bsky.social',
-      accessJwt: 'a',
-      refreshJwt: 'r',
-      service: 'https://bsky.social',
-    },
-  })
-
-  const cookie = `bskybm_session=${accounts.createAuthSession(TEST_DID, 30, 'test')}`
-  return { ctx, cookie }
-}
+import { buildApp, TEST_DID } from './helpers.ts'
 
 describe('http api', () => {
   let app: FastifyInstance

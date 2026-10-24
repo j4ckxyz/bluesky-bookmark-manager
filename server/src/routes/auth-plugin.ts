@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { AppContext } from '../context.ts'
+import type { ApiGrant } from '../db/accounts.ts'
 import type { AccountRecord } from '../types.ts'
 
 export const SESSION_COOKIE = 'bskybm_session'
@@ -8,8 +9,15 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** The signed-in account, set by {@link requireAccount}. */
     account: AccountRecord | null
+    /** The API token behind this request, when it used one. */
+    apiGrant: ApiGrant | null
+    /** True when a bearer token was sent but is unknown, revoked or expired. */
+    badToken: boolean
   }
 }
+
+/** Routes an `agent`-scoped token may reach. Everything else is refused. */
+export const AGENT_API_PREFIX = '/api/agent/v1'
 
 /**
  * Resolves the caller from either the browser session cookie or an
@@ -17,6 +25,8 @@ declare module 'fastify' {
  */
 export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
   app.decorateRequest('account', null)
+  app.decorateRequest('apiGrant', null)
+  app.decorateRequest('badToken', false)
 
   app.addHook('onRequest', async (request, reply) => {
     if (isCrossSiteWrite(request, ctx)) {
@@ -25,9 +35,24 @@ export function registerAuth(app: FastifyInstance, ctx: AppContext): void {
         message: 'Cross-site requests are not allowed. Use an API token instead.',
       })
     }
-    request.account = resolveAccount(request, ctx)
+    resolveCaller(request, ctx)
+
+    // Least privilege: an agent token can search and read, nothing more. The
+    // check uses the matched route pattern rather than the raw URL, so path
+    // tricks such as `/api/agent/v1/../../v1/tokens` cannot slip past it.
+    const route = request.routeOptions.url ?? ''
+    if (request.apiGrant?.scope === 'agent' && !isAgentRoute(route)) {
+      request.account = null
+      return reply.code(403).send({
+        error: 'forbidden',
+        message: `This is an agent token. It can only read bookmarks through ${AGENT_API_PREFIX}. See GET ${AGENT_API_PREFIX} for what it can do.`,
+      })
+    }
   })
 }
+
+const isAgentRoute = (route: string): boolean =>
+  route === AGENT_API_PREFIX || route.startsWith(`${AGENT_API_PREFIX}/`)
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -60,17 +85,21 @@ function isCrossSiteWrite(request: FastifyRequest, ctx: AppContext): boolean {
   }
 }
 
-function resolveAccount(request: FastifyRequest, ctx: AppContext): AccountRecord | null {
+function resolveCaller(request: FastifyRequest, ctx: AppContext): void {
   const header = request.headers.authorization
   if (header?.startsWith('Bearer ')) {
+    // A bearer token never falls back to the cookie: a bad token is a 401,
+    // not a silent switch to whoever is signed in to this browser.
     const token = header.slice('Bearer '.length).trim()
-    if (token) return ctx.accounts.resolveApiToken(token)
+    const grant = token ? ctx.accounts.resolveApiGrant(token) : null
+    request.apiGrant = grant
+    request.account = grant?.account ?? null
+    request.badToken = grant === null
+    return
   }
 
   const cookie = request.cookies[SESSION_COOKIE]
-  if (cookie) return ctx.accounts.resolveAuthSession(cookie)
-
-  return null
+  if (cookie) request.account = ctx.accounts.resolveAuthSession(cookie)
 }
 
 /**

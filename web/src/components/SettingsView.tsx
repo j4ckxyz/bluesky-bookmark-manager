@@ -1,10 +1,12 @@
-import { Copy, Key, LogOut, Plus, Trash2, Unplug } from 'lucide-react'
+import { Copy, Key, LogOut, Plus, Unplug } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.ts'
-import { fullDate, relativeTime } from '../lib/format.ts'
+import { relativeTime } from '../lib/format.ts'
 import type { ThemePreference } from '../lib/hooks.ts'
 import type { Account, ApiToken, InstanceInfo } from '../lib/types.ts'
+import { AgentAccess } from './AgentAccess.tsx'
 import { ConfirmButton } from './ConfirmButton.tsx'
+import { TokenList } from './TokenList.tsx'
 
 type Props = {
   account: Account
@@ -37,14 +39,18 @@ export function SettingsView({
       .catch(() => setTokens([]))
   }, [])
 
+  const refreshTokens = async (): Promise<void> => {
+    setTokens((await api.tokens()).tokens)
+  }
+
   const createToken = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      const created = await api.createToken(tokenName.trim() || 'API token')
+      const created = await api.createToken(tokenName.trim() || 'API token', { scope: 'full' })
       setNewToken(created.token)
       setTokenName('')
-      setTokens((await api.tokens()).tokens)
+      await refreshTokens()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create a token.')
     } finally {
@@ -56,7 +62,7 @@ export function SettingsView({
     setBusy(true)
     try {
       await api.revokeToken(hint)
-      setTokens((await api.tokens()).tokens)
+      await refreshTokens()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not revoke that token.')
     } finally {
@@ -137,12 +143,20 @@ export function SettingsView({
         </div>
       </section>
 
+      <AgentAccess
+        tokens={tokens.filter((token) => token.scope === 'agent')}
+        busy={busy}
+        onCreated={refreshTokens}
+        onRevoke={(hint) => void revoke(hint)}
+      />
+
       <section className="panel">
         <h2 className="panel__title">
           <Key size={14} /> API access
         </h2>
         <p className="hint" style={{ marginBottom: 14 }}>
-          Read your archive from other tools over the same API this page uses. Send the token as{' '}
+          Full access for your own scripts, over the same API this page uses: it can also start
+          syncs and export. For an AI agent, use an agent token above instead. Send the token as{' '}
           <span className="code">Authorization: Bearer …</span>.
         </p>
 
@@ -191,34 +205,11 @@ export function SettingsView({
           </button>
         </div>
 
-        {tokens.length === 0 ? (
-          <p className="hint">No tokens yet.</p>
-        ) : (
-          <div>
-            {tokens.map((token) => (
-              <div key={token.hint} className="token-row">
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 550 }}>{token.name}</div>
-                  <div className="hint">
-                    <span className="code">{token.hint}</span> · created{' '}
-                    {fullDate(token.createdAt)} ·{' '}
-                    {token.lastUsedAt ? `last used ${relativeTime(token.lastUsedAt)}` : 'never used'}
-                  </div>
-                </div>
-                <ConfirmButton
-                  className="button--small"
-                  confirmLabel="Click to revoke"
-                  onConfirm={() => void revoke(token.hint)}
-                  disabled={busy}
-                  aria-label={`Revoke ${token.name}`}
-                >
-                  <Trash2 size={13} />
-                  Revoke
-                </ConfirmButton>
-              </div>
-            ))}
-          </div>
-        )}
+        <TokenList
+          tokens={tokens.filter((token) => token.scope === 'full')}
+          busy={busy}
+          onRevoke={(hint) => void revoke(hint)}
+        />
 
         {error && (
           <div className="error-box" role="alert" style={{ marginTop: 12 }}>

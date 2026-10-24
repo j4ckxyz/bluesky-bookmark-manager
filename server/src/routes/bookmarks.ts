@@ -35,6 +35,8 @@ const SORTS: SortOrder[] = [
   'oldest-posted',
   'likes',
   'reposts',
+  'replies',
+  'random',
 ]
 
 const asList = (value: string | string[] | undefined): string[] => {

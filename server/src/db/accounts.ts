@@ -19,6 +19,22 @@ type AccountRow = {
   sync_counter: number
 }
 
+/** `full` reaches all of `/api/v1`; `agent` only the read-only `/api/agent/v1`. */
+export type TokenScope = 'full' | 'agent'
+
+export const AGENT_TOKEN_PREFIX = 'bbm_agent_'
+
+/** A live API token and the one account it acts for. */
+export type ApiGrant = {
+  account: AccountRecord
+  /** A stable, non-secret identifier derived from the token hash. */
+  id: string
+  name: string
+  hint: string
+  scope: TokenScope
+  expiresAt: string | null
+}
+
 export type StoredSession = {
   did: string
   handle: string
@@ -215,56 +231,102 @@ export class AccountStore {
 
   // --- API tokens -----------------------------------------------------------
 
-  createApiToken(did: string, name: string): { token: string; hint: string; createdAt: string } {
-    const token = generateToken(24)
-    const hint = `${token.slice(0, 6)}…${token.slice(-4)}`
+  createApiToken(
+    did: string,
+    name: string,
+    options: { scope?: TokenScope; expiresAt?: string | null } = {},
+  ): { token: string; hint: string; createdAt: string; scope: TokenScope; expiresAt: string | null } {
+    const scope = options.scope ?? 'full'
+    const expiresAt = options.expiresAt ?? null
+    // Agent tokens carry a recognisable prefix, so they stand out in an
+    // agent's config and secret scanners can spot one pasted somewhere public.
+    const prefix = scope === 'agent' ? AGENT_TOKEN_PREFIX : ''
+    const secret = generateToken(24)
+    const token = `${prefix}${secret}`
+    const hint = `${prefix}${secret.slice(0, 6)}…${secret.slice(-4)}`
     const createdAt = new Date().toISOString()
     this.#db
       .prepare(
-        'INSERT INTO api_tokens (token_hash, did, name, hint, created_at) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO api_tokens (token_hash, did, name, hint, created_at, scope, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(hashToken(token), did, name, hint, createdAt)
-    return { token, hint, createdAt }
+      .run(hashToken(token), did, name, hint, createdAt, scope, expiresAt)
+    return { token, hint, createdAt, scope, expiresAt }
   }
 
   listApiTokens(did: string): Array<{
     name: string
     hint: string
+    scope: TokenScope
     createdAt: string
     lastUsedAt: string | null
+    expiresAt: string | null
+    expired: boolean
   }> {
     const rows = this.#db
       .prepare(
-        'SELECT name, hint, created_at, last_used_at FROM api_tokens WHERE did = ? AND revoked_at IS NULL ORDER BY created_at DESC',
+        `SELECT name, hint, scope, created_at, last_used_at, expires_at FROM api_tokens
+         WHERE did = ? AND revoked_at IS NULL ORDER BY created_at DESC`,
       )
       .all(did) as Array<{
       name: string
       hint: string
+      scope: string
       created_at: string
       last_used_at: string | null
+      expires_at: string | null
     }>
+    const now = new Date().toISOString()
     return rows.map((r) => ({
       name: r.name,
       hint: r.hint,
+      scope: r.scope === 'agent' ? 'agent' : 'full',
       createdAt: r.created_at,
       lastUsedAt: r.last_used_at,
+      expiresAt: r.expires_at,
+      expired: r.expires_at !== null && r.expires_at <= now,
     }))
   }
 
-  resolveApiToken(token: string): AccountRecord | null {
+  /**
+   * Looks up a live token: not revoked, not expired, and belonging to an
+   * account that is still enabled. The grant names exactly one account, and
+   * every read made with it is scoped to that account's DID.
+   */
+  resolveApiGrant(token: string): ApiGrant | null {
     const hash = hashToken(token)
+    const now = new Date().toISOString()
     const row = this.#db
       .prepare(
-        `SELECT a.* FROM api_tokens t
+        `SELECT a.*, t.name AS token_name, t.hint AS token_hint, t.scope AS token_scope,
+                t.expires_at AS token_expires_at
+         FROM api_tokens t
          JOIN accounts a ON a.did = t.did
-         WHERE t.token_hash = ? AND t.revoked_at IS NULL AND a.disabled = 0`,
+         WHERE t.token_hash = ? AND t.revoked_at IS NULL AND a.disabled = 0
+           AND (t.expires_at IS NULL OR t.expires_at > ?)`,
       )
-      .get(hash) as AccountRow | undefined
+      .get(hash, now) as
+      | (AccountRow & {
+          token_name: string
+          token_hint: string
+          token_scope: string
+          token_expires_at: string | null
+        })
+      | undefined
     if (!row) return null
-    this.#db
-      .prepare('UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?')
-      .run(new Date().toISOString(), hash)
-    return toAccountRecord(row)
+    this.#db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?').run(now, hash)
+    return {
+      account: toAccountRecord(row),
+      // The rate limiter keys on this, never on the raw token.
+      id: hash.slice(0, 24),
+      name: row.token_name,
+      hint: row.token_hint,
+      scope: row.token_scope === 'agent' ? 'agent' : 'full',
+      expiresAt: row.token_expires_at,
+    }
+  }
+
+  resolveApiToken(token: string): AccountRecord | null {
+    return this.resolveApiGrant(token)?.account ?? null
   }
 
   revokeApiToken(did: string, hint: string): boolean {
