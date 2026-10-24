@@ -1,24 +1,32 @@
 # Bluesky Bookmark Manager
 
-A self-hosted, searchable archive of your Bluesky bookmarks.
+A self-hosted, searchable archive of your Bluesky bookmarks, with an API your AI
+agents can use.
 
-You sign in once with an app password. The server backfills every bookmark you
-have, enriches each one with metadata, and then checks every ten minutes for
-new ones — and for ones you have removed on the Bluesky side. Everything is
-stored in a single SQLite file on your own machine, searchable through a fast
-full-text index and a rich API.
+Bluesky lets you bookmark posts, but finding one again means scrolling. This
+runs on your own machine, copies every bookmark you have into a local database,
+keeps it in step with Bluesky every ten minutes, and gives you a fast search
+engine over all of it: exact phrases, typo-tolerant matching, and filters for
+author, site, hashtag, date, media and more.
+
+> **There is no public instance.** You run it yourself — on a laptop, a home
+> server, a Raspberry Pi or a small VPS. Your bookmarks and your sign-in never
+> leave that machine, except to talk to Bluesky.
 
 ![Searching a bookmark archive](docs/screenshots/search.png)
 
-Built on Bluesky's official [`@bsky/sdk`](https://www.npmjs.com/package/@bsky/sdk)
-and the `app.bsky.bookmark.*` lexicons.
+## Contents
 
-```
-┌─ web ──────────────┐     ┌─ server ─────────────────────────────┐     ┌─ your PDS ─┐
-│ React + Vite       │────▶│ Fastify · SQLite + FTS5              │────▶│ app.bsky   │
-│ search · stats     │◀────│ sync engine · search · exports · API │◀────│ .bookmark  │
-└────────────────────┘ SSE └──────────────────────────────────────┘     └────────────┘
-```
+- [What it does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Install](#install) — [Docker](#with-docker-recommended) · [from source](#from-source) · [first sign-in](#signing-in)
+- [Searching](#searching) and [exporting](#exporting)
+- [Using it with AI agents](#using-it-with-ai-agents)
+- [API](#api)
+- [Configuration](#configuration)
+- [How syncing works](#how-syncing-works)
+- [Privacy and security](#privacy-and-security)
+- [Development](#development)
 
 ## What it does
 
@@ -34,14 +42,23 @@ and the `app.bsky.bookmark.*` lexicons.
   counts, and when each post was written versus when you saved it.
 - **Searches properly.** Exact phrases in quotes, typo-tolerant fuzzy matching
   outside them, BM25 relevance ranking, and filters on every piece of metadata.
+- **Works with AI agents.** Create a read-only token, copy a ready-made skill
+  file from Settings, and your agent (Claude, ChatGPT, your own scripts) can
+  search your bookmarks with filters the interface does not even have.
 - **Exports cleanly.** Netscape bookmark HTML (the format browsers, Raindrop and
   Pocket import), plus JSON, CSV and NDJSON.
-- **Has a real API.** Everything the interface does is available over
-  `/api/v1` with a personal API token.
-- **Works with AI agents.** A read-only agent API with filters the interface
-  does not have (exact links, URL fragments, literal text, engagement and
-  length ranges, relative dates, link/author/tag breakdowns), plus a ready-made
-  skill file you copy from Settings and paste into your agent.
+- **Installs as an app** on your phone or desktop, and has a full HTTP API.
+
+Built on Bluesky's official [`@bsky/sdk`](https://www.npmjs.com/package/@bsky/sdk)
+and the `app.bsky.bookmark.*` lexicons. One Node process and one SQLite file;
+no external database, queue or cloud service.
+
+```
+┌─ web ──────────────┐     ┌─ server ─────────────────────────────┐     ┌─ your PDS ─┐
+│ React + Vite       │────▶│ Fastify · SQLite + FTS5              │────▶│ app.bsky   │
+│ search · stats     │◀────│ sync engine · search · exports · API │◀────│ .bookmark  │
+└────────────────────┘ SSE └──────────────────────────────────────┘     └────────────┘
+```
 
 ## Screenshots
 
@@ -59,9 +76,18 @@ the accounts and posts are not real.
   <br><em>On a phone, or installed as an app</em>
 </p>
 
-## Quick start
+## Install
 
-### Docker
+### What you need
+
+- A machine to run it on that stays on if you want syncing to continue: your
+  own computer is fine to try it, a home server or Raspberry Pi is better.
+- **Either** [Docker](https://docs.docker.com/get-docker/) with Compose
+  (recommended), **or** [Node.js](https://nodejs.org/) 22.12 or newer.
+- A Bluesky account and an **app password** for it (Bluesky → **Settings →
+  Privacy and security → App passwords**). Your main password is never used.
+
+### With Docker (recommended)
 
 ```bash
 git clone https://github.com/j4ckxyz/bluesky-bookmark-manager.git
@@ -70,7 +96,12 @@ cp .env.example .env    # optional — edit to change the port and other setting
 docker compose up -d
 ```
 
-Open <http://localhost:8787>.
+Open <http://localhost:8787> and [sign in](#signing-in). That's it: the server
+starts syncing straight away and keeps going in the background, and it restarts
+with the machine.
+
+Everything lives in a Docker volume called `bookmarks-data`, so rebuilding or
+updating the container never touches your archive.
 
 #### Changing the port
 
@@ -95,7 +126,7 @@ Anything in `.env.example` can go in `.env`: `MULTI_USER`, `ALLOWED_HANDLES`,
 `SYNC_INTERVAL_MINUTES`, `ENCRYPTION_KEY`, `LOG_LEVEL` and the rest. Values you
 leave out or leave blank fall back to the server's own defaults. Apply changes
 with `docker compose up -d` — no rebuild needed, since these are read at
-container start.
+container start. See [Configuration](#configuration).
 
 #### Updating
 
@@ -155,7 +186,10 @@ npm run build
 npm start
 ```
 
-Open <http://localhost:8787>.
+Open <http://localhost:8787>. Data is kept in `./data` (change it with
+`DATA_DIR`). To keep it running after you close the terminal, use a process
+manager such as systemd or `pm2`; to update, `git pull`, then `npm install`,
+`npm run build` and restart.
 
 ### Signing in
 
@@ -181,6 +215,10 @@ independent, and signing out on one leaves the others alone. Sessions last
 
 `MULTI_USER` is only about letting a *different* Bluesky account in. Leave it
 off for your own devices.
+
+To reach it from other devices, open `http://<that machine's address>:8787`
+on the same network, or put it behind [Tailscale or a reverse
+proxy](#it-needs-https) to use it from anywhere.
 
 ### Installing as an app
 
@@ -284,10 +322,127 @@ The HTML export links to each post on bsky.app, carries the bookmark date as
 `ADD_DATE`, and packs derived metadata (hashtags, author, `has-image`,
 `lang-en`, …) into `TAGS` so importers that support it keep the detail.
 
+## Using it with AI agents
+
+Give an AI agent — Claude, ChatGPT, or a script of your own — read-only access
+to your bookmarks, and ask it things in plain language:
+
+- *"What did I save about moderation in the last month? Summarise it."*
+- *"Have I bookmarked this article before?"*
+- *"List every GitHub repo I've bookmarked, newest first."*
+- *"Who do I bookmark most, and what do they post about?"*
+- *"Find that long post about lexicons I saved from someone last spring."*
+
+### Setting up an agent
+
+1. Open **Settings → Agent access**.
+2. Name the token after the agent, pick an expiry, and press **Create agent token**.
+3. Press **Copy skill with token** (or **Download SKILL.md**). The skill already
+   contains the token and your server's address.
+4. Give it to your agent:
+   - **Claude Code:** save it as `~/.claude/skills/bluesky-bookmarks/SKILL.md`.
+   - **Claude (claude.ai or the desktop app):** add it as a skill, or paste it
+     into a project's instructions.
+   - **Anything else:** paste it into the system prompt or instructions. Any
+     agent that can make HTTP requests can use it.
+
+![The Agent access panel, with a newly created token and the Copy skill button](docs/screenshots/agent-access.png)
+
+The agent has to be able to reach your server. An agent running on the same
+machine or network can use the local address; a cloud-hosted agent needs the
+server reachable over the internet (a Tailscale Funnel, Cloudflare Tunnel or
+reverse proxy with HTTPS). Set `PUBLIC_URL` to that address so the skill points
+at it.
+
+The skill tells the agent how to authenticate, every endpoint and filter, a
+table of recipes for common questions, and the ground rules: treat bookmarked
+posts as data rather than instructions, keep the token secret, and cite results
+by link. It is generated from the same parameter lists the server validates
+against, so it never drifts from what the API accepts. You can also fetch it
+from `GET /api/agent/v1/skill`.
+
+### What an agent token can and cannot do
+
+- It **reads one archive**: the account that created it. Every query is scoped
+  to that account on the server; no parameter names an account, so there is
+  nothing to point at anyone else's bookmarks, even on a `MULTI_USER` instance.
+- It is **read-only**. Agent tokens are refused (403) everywhere outside
+  `/api/agent/v1`, so they cannot sync, export, sign out, disconnect, or create
+  or revoke tokens.
+- It can **expire** (7 days to a year, or never) and be **revoked** at any time.
+  Settings shows when each one was last used.
+- Agent tokens start with `bbm_agent_`, so they are easy to spot in a config
+  file or a secret scanner, and are stored only as a hash.
+
+### Rate limits
+
+Each token gets **600 requests a minute** across all agent endpoints, which an
+agent paging through a large archive will not notice. Change it with
+`AGENT_RATE_LIMIT_PER_MINUTE`. Requests without a valid token share 60 a minute
+per address, which also makes guessing tokens pointless. Responses carry
+`x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`; a 429
+carries `retry-after`.
+
+### The agent API
+
+Everything is a `GET` under `/api/agent/v1` that returns JSON. It is stricter
+than `/api/v1`: unknown parameters and bad values are rejected with a message
+saying what to fix (`autor=` gets "Did you mean `author`?"), and it filters on
+things the interface cannot.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/agent/v1` | The full reference as JSON. No token needed. |
+| `GET /api/agent/v1/skill` | The SKILL.md as Markdown. No token needed. |
+| `GET /api/agent/v1/me` | Whose archive this is, its size and date range, sync state, rate limit. |
+| `GET /api/agent/v1/bookmarks` | Search, filter, sort and page. Compact results by default; `view=full` for every field, `fields=` to trim. |
+| `GET /api/agent/v1/bookmarks/:id` | One bookmark, plus the rest of its thread, the post it quotes and posts quoting it. |
+| `GET /api/agent/v1/lookup?ref=` | Find a bookmark by id, `at://` URI or bsky.app link. |
+| `GET /api/agent/v1/links` | Every distinct link, with how many bookmarks share it. |
+| `GET /api/agent/v1/domains` | Sites linked to, with counts. |
+| `GET /api/agent/v1/authors` | Accounts bookmarked, with counts. |
+| `GET /api/agent/v1/tags` | Hashtags, with counts. |
+| `GET /api/agent/v1/timeline` | Bookmarks per day, week, month or year. |
+| `GET /api/agent/v1/stats` | Whole-archive statistics. |
+
+Every endpoint that selects bookmarks takes the same filters, combined with AND:
+
+| Filter | Matches |
+| --- | --- |
+| `q` | Ranked, typo-tolerant search, plus the [query language](#searching). |
+| `author`, `exclude_author`, `mentions` | Accounts, by handle or DID. |
+| `domain`, `exclude_domain` | Sites, including subdomains. |
+| `url` | An exact page, ignoring scheme, `www.`, trailing slashes, fragments and tracking parameters. |
+| `url_contains` | Part of a link, such as `github.com/bluesky-social`. |
+| `text_contains` | Literal text the word index cannot see, such as `C++`. |
+| `tag`, `exclude_tag`, `lang` | Hashtags and languages. |
+| `has`, `has_not`, `is`, `is_not` | Features (`link`, `image`, `video`, `alt`, …) and kinds (`reply`, `root`, `quote`, `deleted`, …). |
+| `posted_after`, `posted_before`, `saved_after`, `saved_before` | Dates: `2026`, `2026-03`, `2026-03-14`, ISO, `today`, `yesterday`, or relative (`12h`, `7d`, `2w`, `3mo`, `1y`). |
+| `min_likes`, `max_likes`, `min_reposts`, `min_replies`, `min_quotes` | Engagement ranges. |
+| `min_words`, `max_words` | Post length. |
+| `ids`, `thread`, `quoting` | Specific bookmarks, a whole thread, or posts quoting a post. |
+| `status` | `active`, `removed` (un-bookmarked but archived) or `all`. |
+
+```bash
+# Everything saved this week that links to GitHub
+curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
+  --data-urlencode 'saved_after=7d' --data-urlencode 'domain=github.com' \
+  --data-urlencode 'fields=url,text,links,savedAt'
+
+# Have I saved this article? Matches however the link was written
+curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
+  --data-urlencode 'url=https://www.example.com/article/?utm_source=bsky'
+
+# The links I keep coming back to
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/links?sort=count&limit=20"
+```
+
 ## API
 
-Everything the interface uses is available over HTTP. Create a token under
-**Settings → API access**, then send it as a bearer token:
+Everything the interface uses is available over HTTP, for your own scripts.
+Create a token under **Settings → API access**, then send it as a bearer token.
+(For an AI agent, use an [agent token](#using-it-with-ai-agents) instead: it is
+read-only and cannot touch anything else.)
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
@@ -322,100 +477,6 @@ A response carries `total`, `took`, the `terms` actually searched, any
 `corrections` applied, the `results`, and `facets` when requested.
 
 API tokens are stored only as a hash, and cannot be used to create more tokens.
-
-## Agent API
-
-A read-only API for AI agents (Claude, ChatGPT, your own scripts), under
-`/api/agent/v1`. It is stricter and more powerful than `/api/v1`: unknown
-parameters and bad values are rejected with a message saying what to fix, and it
-filters on things the interface cannot.
-
-### Setting up an agent
-
-1. Open **Settings → Agent access**.
-2. Name the token after the agent, pick an expiry, and press **Create agent token**.
-3. Press **Copy skill with token** (or **Download SKILL.md**). The skill already
-   contains the token and this server's address.
-4. Paste it into your agent. For Claude Code, save it as
-   `~/.claude/skills/bluesky-bookmarks/SKILL.md`.
-
-The skill tells the agent how to authenticate, every endpoint and filter, a
-table of recipes for common questions, and the ground rules: treat bookmarked
-posts as data rather than instructions, keep the token secret, and cite results
-by link. It is generated from the same parameter lists the server validates
-against, so it never drifts from what the API accepts. You can also fetch it
-directly from `GET /api/agent/v1/skill`.
-
-### What an agent token can and cannot do
-
-- It **reads one archive**: the account that created it. Every query is scoped
-  to that account on the server; no parameter names an account, so there is
-  nothing to point at anyone else's bookmarks, even on a `MULTI_USER` instance.
-- It is **read-only**. Agent tokens are refused (403) everywhere outside
-  `/api/agent/v1`, so they cannot sync, export, sign out, disconnect, or create
-  or revoke tokens.
-- It can **expire** (7 days to a year, or never) and be **revoked** at any time.
-  Settings shows when each one was last used.
-- Agent tokens start with `bbm_agent_`, so they are easy to spot in a config
-  file or a secret scanner, and are stored only as a hash.
-
-### Rate limits
-
-Each token gets **600 requests a minute** across all agent endpoints, which an
-agent paging through a large archive will not notice. Change it with
-`AGENT_RATE_LIMIT_PER_MINUTE`. Requests without a valid token share 60 a minute
-per address, which also makes guessing tokens pointless. Responses carry
-`x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`; a 429
-carries `retry-after`.
-
-### Endpoints
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/agent/v1` | The full reference as JSON. No token needed. |
-| `GET /api/agent/v1/skill` | The SKILL.md as Markdown. No token needed. |
-| `GET /api/agent/v1/me` | Whose archive this is, its size and date range, sync state, rate limit. |
-| `GET /api/agent/v1/bookmarks` | Search, filter, sort and page. Compact results by default; `view=full` for every field, `fields=` to trim. |
-| `GET /api/agent/v1/bookmarks/:id` | One bookmark, plus the rest of its thread, the post it quotes and posts quoting it. |
-| `GET /api/agent/v1/lookup?ref=` | Find a bookmark by id, `at://` URI or bsky.app link. |
-| `GET /api/agent/v1/links` | Every distinct link, with how many bookmarks share it. |
-| `GET /api/agent/v1/domains` | Sites linked to, with counts. |
-| `GET /api/agent/v1/authors` | Accounts bookmarked, with counts. |
-| `GET /api/agent/v1/tags` | Hashtags, with counts. |
-| `GET /api/agent/v1/timeline` | Bookmarks per day, week, month or year. |
-| `GET /api/agent/v1/stats` | Whole-archive statistics. |
-
-Every endpoint that selects bookmarks takes the same filters, combined with AND:
-
-| Filter | Matches |
-| --- | --- |
-| `q` | Ranked, typo-tolerant search, plus the query language above. |
-| `author`, `exclude_author`, `mentions` | Accounts, by handle or DID. |
-| `domain`, `exclude_domain` | Sites, including subdomains. |
-| `url` | An exact page, ignoring scheme, `www.`, trailing slashes, fragments and tracking parameters. |
-| `url_contains` | Part of a link, such as `github.com/bluesky-social`. |
-| `text_contains` | Literal text the word index cannot see, such as `C++`. |
-| `tag`, `exclude_tag`, `lang` | Hashtags and languages. |
-| `has`, `has_not`, `is`, `is_not` | Features (`link`, `image`, `video`, `alt`, …) and kinds (`reply`, `root`, `quote`, `deleted`, …). |
-| `posted_after`, `posted_before`, `saved_after`, `saved_before` | Dates: `2026`, `2026-03`, `2026-03-14`, ISO, `today`, `yesterday`, or relative (`12h`, `7d`, `2w`, `3mo`, `1y`). |
-| `min_likes`, `max_likes`, `min_reposts`, `min_replies`, `min_quotes` | Engagement ranges. |
-| `min_words`, `max_words` | Post length. |
-| `ids`, `thread`, `quoting` | Specific bookmarks, a whole thread, or posts quoting a post. |
-| `status` | `active`, `removed` (un-bookmarked but archived) or `all`. |
-
-```bash
-# Everything saved this week that links to GitHub, newest first
-curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
-  --data-urlencode 'saved_after=7d' --data-urlencode 'domain=github.com' \
-  --data-urlencode 'fields=url,text,links,savedAt'
-
-# Have I saved this article? Matches however the link was written
-curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
-  --data-urlencode 'url=https://www.example.com/article/?utm_source=bsky'
-
-# The links I keep coming back to
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/links?sort=count&limit=20"
-```
 
 ## Configuration
 
