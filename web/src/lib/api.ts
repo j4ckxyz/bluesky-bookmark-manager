@@ -10,6 +10,7 @@ import type {
   StatusFilter,
   Suggestions,
   SyncProgress,
+  TokenScope,
   TypeaheadActor,
 } from './types.ts'
 
@@ -149,16 +150,23 @@ export const api = {
 
   tokens: () => request<{ tokens: ApiToken[] }>('/api/v1/tokens'),
 
-  createToken: (name: string) =>
+  createToken: (name: string, options: { scope?: TokenScope; expiresInDays?: number | null } = {}) =>
     request<ApiToken & { token: string }>('/api/v1/tokens', {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, ...options }),
     }),
 
   revokeToken: (hint: string) =>
     request<{ revoked: boolean }>(`/api/v1/tokens/${encodeURIComponent(hint)}`, {
       method: 'DELETE',
     }),
+
+  /** The agent SKILL.md, rendered for the address this page is served from. */
+  agentSkill: async (baseUrl: string): Promise<string> => {
+    const response = await fetch(`/api/agent/v1/skill?base_url=${encodeURIComponent(baseUrl)}`)
+    if (!response.ok) throw new ApiError(response.status, 'error', 'Could not load the agent skill.')
+    return response.text()
+  },
 
   /** Exports are downloads, so they go through the browser, not fetch. */
   exportUrl: (format: string, params: SearchParams): string =>

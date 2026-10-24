@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MIGRATIONS } from './schema.ts'
 import { damerauLevenshtein } from '../lib/fuzzy.ts'
+import { urlKey } from '../lib/url.ts'
 
 export type Db = Database.Database
 
@@ -33,6 +34,11 @@ function registerFunctions(db: Db): void {
     if (typeof a !== 'string' || typeof b !== 'string') return 99
     return damerauLevenshtein(a, b)
   })
+  // Lets "is this exact link saved?" ignore scheme, `www.`, trailing slashes
+  // and tracking parameters without storing a second copy of every URL.
+  db.function('url_key', { deterministic: true }, (url: unknown) =>
+    typeof url === 'string' ? urlKey(url) : null,
+  )
 }
 
 export function migrate(db: Db): void {

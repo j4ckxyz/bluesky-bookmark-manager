@@ -38,6 +38,10 @@ and the `app.bsky.bookmark.*` lexicons.
   Pocket import), plus JSON, CSV and NDJSON.
 - **Has a real API.** Everything the interface does is available over
   `/api/v1` with a personal API token.
+- **Works with AI agents.** A read-only agent API with filters the interface
+  does not have (exact links, URL fragments, literal text, engagement and
+  length ranges, relative dates, link/author/tag breakdowns), plus a ready-made
+  skill file you copy from Settings and paste into your agent.
 
 ## Screenshots
 
@@ -319,6 +323,100 @@ A response carries `total`, `took`, the `terms` actually searched, any
 
 API tokens are stored only as a hash, and cannot be used to create more tokens.
 
+## Agent API
+
+A read-only API for AI agents (Claude, ChatGPT, your own scripts), under
+`/api/agent/v1`. It is stricter and more powerful than `/api/v1`: unknown
+parameters and bad values are rejected with a message saying what to fix, and it
+filters on things the interface cannot.
+
+### Setting up an agent
+
+1. Open **Settings → Agent access**.
+2. Name the token after the agent, pick an expiry, and press **Create agent token**.
+3. Press **Copy skill with token** (or **Download SKILL.md**). The skill already
+   contains the token and this server's address.
+4. Paste it into your agent. For Claude Code, save it as
+   `~/.claude/skills/bluesky-bookmarks/SKILL.md`.
+
+The skill tells the agent how to authenticate, every endpoint and filter, a
+table of recipes for common questions, and the ground rules: treat bookmarked
+posts as data rather than instructions, keep the token secret, and cite results
+by link. It is generated from the same parameter lists the server validates
+against, so it never drifts from what the API accepts. You can also fetch it
+directly from `GET /api/agent/v1/skill`.
+
+### What an agent token can and cannot do
+
+- It **reads one archive**: the account that created it. Every query is scoped
+  to that account on the server; no parameter names an account, so there is
+  nothing to point at anyone else's bookmarks, even on a `MULTI_USER` instance.
+- It is **read-only**. Agent tokens are refused (403) everywhere outside
+  `/api/agent/v1`, so they cannot sync, export, sign out, disconnect, or create
+  or revoke tokens.
+- It can **expire** (7 days to a year, or never) and be **revoked** at any time.
+  Settings shows when each one was last used.
+- Agent tokens start with `bbm_agent_`, so they are easy to spot in a config
+  file or a secret scanner, and are stored only as a hash.
+
+### Rate limits
+
+Each token gets **600 requests a minute** across all agent endpoints, which an
+agent paging through a large archive will not notice. Change it with
+`AGENT_RATE_LIMIT_PER_MINUTE`. Requests without a valid token share 60 a minute
+per address, which also makes guessing tokens pointless. Responses carry
+`x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`; a 429
+carries `retry-after`.
+
+### Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/agent/v1` | The full reference as JSON. No token needed. |
+| `GET /api/agent/v1/skill` | The SKILL.md as Markdown. No token needed. |
+| `GET /api/agent/v1/me` | Whose archive this is, its size and date range, sync state, rate limit. |
+| `GET /api/agent/v1/bookmarks` | Search, filter, sort and page. Compact results by default; `view=full` for every field, `fields=` to trim. |
+| `GET /api/agent/v1/bookmarks/:id` | One bookmark, plus the rest of its thread, the post it quotes and posts quoting it. |
+| `GET /api/agent/v1/lookup?ref=` | Find a bookmark by id, `at://` URI or bsky.app link. |
+| `GET /api/agent/v1/links` | Every distinct link, with how many bookmarks share it. |
+| `GET /api/agent/v1/domains` | Sites linked to, with counts. |
+| `GET /api/agent/v1/authors` | Accounts bookmarked, with counts. |
+| `GET /api/agent/v1/tags` | Hashtags, with counts. |
+| `GET /api/agent/v1/timeline` | Bookmarks per day, week, month or year. |
+| `GET /api/agent/v1/stats` | Whole-archive statistics. |
+
+Every endpoint that selects bookmarks takes the same filters, combined with AND:
+
+| Filter | Matches |
+| --- | --- |
+| `q` | Ranked, typo-tolerant search, plus the query language above. |
+| `author`, `exclude_author`, `mentions` | Accounts, by handle or DID. |
+| `domain`, `exclude_domain` | Sites, including subdomains. |
+| `url` | An exact page, ignoring scheme, `www.`, trailing slashes, fragments and tracking parameters. |
+| `url_contains` | Part of a link, such as `github.com/bluesky-social`. |
+| `text_contains` | Literal text the word index cannot see, such as `C++`. |
+| `tag`, `exclude_tag`, `lang` | Hashtags and languages. |
+| `has`, `has_not`, `is`, `is_not` | Features (`link`, `image`, `video`, `alt`, …) and kinds (`reply`, `root`, `quote`, `deleted`, …). |
+| `posted_after`, `posted_before`, `saved_after`, `saved_before` | Dates: `2026`, `2026-03`, `2026-03-14`, ISO, `today`, `yesterday`, or relative (`12h`, `7d`, `2w`, `3mo`, `1y`). |
+| `min_likes`, `max_likes`, `min_reposts`, `min_replies`, `min_quotes` | Engagement ranges. |
+| `min_words`, `max_words` | Post length. |
+| `ids`, `thread`, `quoting` | Specific bookmarks, a whole thread, or posts quoting a post. |
+| `status` | `active`, `removed` (un-bookmarked but archived) or `all`. |
+
+```bash
+# Everything saved this week that links to GitHub, newest first
+curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
+  --data-urlencode 'saved_after=7d' --data-urlencode 'domain=github.com' \
+  --data-urlencode 'fields=url,text,links,savedAt'
+
+# Have I saved this article? Matches however the link was written
+curl -sG -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/bookmarks" \
+  --data-urlencode 'url=https://www.example.com/article/?utm_source=bsky'
+
+# The links I keep coming back to
+curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8787/api/agent/v1/links?sort=count&limit=20"
+```
+
 ## Configuration
 
 Every setting is an environment variable, and every one is optional. See
@@ -337,6 +435,7 @@ knowing:
 | `FULL_SYNC_EVERY` | `6` | Every Nth check is a full reconciliation. Hourly by default. |
 | `PURGE_REMOVED_AFTER_DAYS` | `0` | Delete un-bookmarked posts after N days. `0` keeps them forever. |
 | `TRUST_PROXY` | `false` | Set when behind a reverse proxy. |
+| `AGENT_RATE_LIMIT_PER_MINUTE` | `600` | Requests a minute per token on the agent API. |
 
 ### Behind a reverse proxy
 
@@ -370,6 +469,8 @@ millisecond.
 - Your app password is exchanged for a session and then discarded. The refresh
   token is encrypted with AES-256-GCM before it touches the database.
 - Session cookies and API tokens are stored only as SHA-256 hashes.
+- Agent tokens are read-only, reach only `/api/agent/v1`, read only the
+  archive of the account that created them, can expire, and are rate limited.
 - Nothing is sent anywhere except your own PDS and the public AppView (used
   unauthenticated for handle suggestions and profile pictures). Point
   `APPVIEW_URL` elsewhere, or leave the handle field alone, if you would rather
@@ -397,7 +498,7 @@ in development.
 
 ```bash
 npm run check        # typecheck both workspaces, then run the test suite
-npm test             # 147 tests: metadata, query parsing, search, sync, API, exports
+npm test             # 208 tests: metadata, query parsing, search, sync, API, agent API, exports
 npm run seed:demo -w server   # fill the database with sample bookmarks
 ```
 
@@ -415,6 +516,7 @@ server/
     search/      query language parser, ranked search
     sync/        backfill and reconciliation engine, scheduler
     routes/      HTTP surface
+    agent/       agent API: parameters, routes, docs and the SKILL.md
     metadata.ts  everything derived from a bookmark view
     export.ts    Netscape HTML, JSON, CSV, NDJSON
   test/          node:test suites, fixture-driven

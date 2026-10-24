@@ -4,6 +4,7 @@ import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { registerAgentRoutes } from './agent/routes.ts'
 import type { AppContext } from './context.ts'
 import { registerAuth } from './routes/auth-plugin.ts'
 import { registerAuthRoutes } from './routes/auth.ts'
@@ -20,8 +21,8 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
   })
 
   await app.register(cookie)
-  // Opt-in per route: only the unauthenticated endpoints that reach out to
-  // other servers are limited, so normal browsing is never throttled.
+  // Opt-in per route: the unauthenticated endpoints that reach out to other
+  // servers, and the agent API. Normal browsing is never throttled.
   await app.register(rateLimit, { global: false })
 
   registerAuth(app, ctx)
@@ -29,6 +30,7 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
   registerBookmarkRoutes(app, ctx)
   registerSyncRoutes(app, ctx)
   registerTokenRoutes(app, ctx)
+  registerAgentRoutes(app, ctx)
 
   app.get('/api/v1/health', async (request, reply) => {
     // Touch the database so a broken volume or locked file shows up here,
@@ -58,10 +60,12 @@ export async function createApp(ctx: AppContext): Promise<FastifyInstance> {
   })
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    request.log.error({ err: error }, 'request failed')
     const status = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500
+    // A rate-limited or malformed request is the caller's problem, not ours.
+    if (status >= 500) request.log.error({ err: error }, 'request failed')
+    else request.log.info({ err: error }, 'request rejected')
     return reply.code(status).send({
-      error: status === 500 ? 'internal' : 'request_failed',
+      error: status === 500 ? 'internal' : status === 429 ? 'rate_limited' : 'request_failed',
       // Never leak an internal stack or message to the client.
       message: status === 500 ? 'Something went wrong.' : error.message,
     })

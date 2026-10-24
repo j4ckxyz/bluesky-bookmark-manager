@@ -4,7 +4,12 @@ import { BookmarkStore } from '../src/db/bookmarks.ts'
 import { openDatabase, type Db } from '../src/db/index.ts'
 import { SyncEngine } from '../src/sync/engine.ts'
 import { SyncRunStore } from '../src/sync/runs.ts'
+import { IdentityResolver } from '../src/atproto/identity.ts'
+import { SessionManager } from '../src/atproto/session.ts'
 import type { Config } from '../src/config.ts'
+import type { AppContext } from '../src/context.ts'
+import { SearchService } from '../src/search/search.ts'
+import { SyncScheduler } from '../src/sync/scheduler.ts'
 
 export const TEST_DID = 'did:plc:testowner'
 
@@ -33,6 +38,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     multiUser: false,
     allowedHandles: [] as string[],
     sessionTtlDays: 30,
+    agentRateLimitPerMinute: 600,
     secureCookies: false,
     trustProxy: false,
     logLevel: 'silent',
@@ -81,4 +87,51 @@ export function createHarness(overrides: Partial<Config> = {}): TestHarness {
   })
 
   return { db, config, accounts, bookmarks, runs, engine }
+}
+
+/** Adds an account with a dummy PDS session, as a sign-in would. */
+export function addAccount(accounts: AccountStore, did: string, handle: string): void {
+  accounts.upsert({
+    did,
+    handle,
+    displayName: null,
+    avatar: null,
+    pdsUrl: 'https://bsky.social',
+    session: { did, handle, accessJwt: 'a', refreshJwt: 'r', service: 'https://bsky.social' },
+  })
+}
+
+/**
+ * Builds a full app context over an in-memory database, with one signed-in
+ * account and a browser session cookie already issued.
+ */
+export function buildApp(overrides: Partial<Config> = {}): { ctx: AppContext; cookie: string } {
+  const config = testConfig(overrides)
+  const db = openDatabase(':memory:')
+  const accounts = new AccountStore(db, config.encryptionKey)
+  const bookmarks = new BookmarkStore(db)
+  const runs = new SyncRunStore(db)
+  const search = new SearchService(db, bookmarks)
+  const identity = new IdentityResolver(config)
+  const sessions = new SessionManager(config, accounts, identity)
+  const engine = new SyncEngine({ config, accounts, bookmarks, runs, clientFor: async () => null })
+  const scheduler = new SyncScheduler({ config, accounts, engine })
+
+  const ctx: AppContext = {
+    config,
+    db,
+    accounts,
+    bookmarks,
+    runs,
+    search,
+    identity,
+    sessions,
+    engine,
+    scheduler,
+    close: () => db.close(),
+  }
+
+  addAccount(accounts, TEST_DID, 'owner.bsky.social')
+  const cookie = `bskybm_session=${accounts.createAuthSession(TEST_DID, 30, 'test')}`
+  return { ctx, cookie }
 }
